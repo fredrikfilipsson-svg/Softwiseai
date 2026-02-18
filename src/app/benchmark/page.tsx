@@ -3,20 +3,16 @@
 import { useState } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import AccessGate from "@/components/AccessGate";
 import StepVendor from "@/components/StepVendor";
 import StepIndustry from "@/components/StepIndustry";
 import StepContract from "@/components/StepContract";
 import ReportView from "@/components/ReportView";
 import { VendorResearch, BenchmarkReport } from "@/lib/types";
 
-type Step = "access" | "vendor" | "industry" | "contract" | "analyzing" | "report";
+type Step = "vendor" | "industry" | "contract" | "analyzing" | "report";
 
 export default function BenchmarkPage() {
-  const [step, setStep] = useState<Step>("access");
-  const [userEmail, setUserEmail] = useState("");
-  const [userName, setUserName] = useState("");
-  const [userCompany, setUserCompany] = useState("");
+  const [step, setStep] = useState<Step>("vendor");
   const [vendor, setVendor] = useState("");
   const [industry, setIndustry] = useState("");
   const [contractText, setContractText] = useState("");
@@ -25,18 +21,10 @@ export default function BenchmarkPage() {
   const [error, setError] = useState("");
 
   const stepNumber =
-    step === "access" ? 0 :
     step === "vendor" ? 1 :
     step === "industry" ? 2 :
     step === "contract" ? 3 :
     step === "analyzing" ? 4 : 5;
-
-  const handleAccessGranted = (email: string, name: string, company: string) => {
-    setUserEmail(email);
-    setUserName(name);
-    setUserCompany(company);
-    setStep("vendor");
-  };
 
   const handleVendorSelect = (selectedVendor: string, research: VendorResearch) => {
     setVendor(selectedVendor);
@@ -62,7 +50,6 @@ export default function BenchmarkPage() {
           vendor,
           industry,
           contractText: text,
-          email: userEmail,
         }),
       });
 
@@ -81,8 +68,7 @@ export default function BenchmarkPage() {
       <Header />
       <main className="flex-1 bg-gray-50">
         {/* Progress bar */}
-        {step !== "access" && (
-          <div className="border-b border-gray-200 bg-white">
+        <div className="border-b border-gray-200 bg-white">
             <div className="mx-auto max-w-3xl px-4 py-4 sm:px-6">
               <div className="flex items-center justify-between mb-2">
                 {["Vendor", "Industry", "Contract", "Report"].map((label, i) => (
@@ -119,9 +105,9 @@ export default function BenchmarkPage() {
               </div>
             </div>
           </div>
-        )}
 
         <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
+
           {error && (
             <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
               {error}
@@ -132,10 +118,6 @@ export default function BenchmarkPage() {
                 Dismiss
               </button>
             </div>
-          )}
-
-          {step === "access" && (
-            <AccessGate onAccessGranted={handleAccessGranted} />
           )}
 
           {step === "vendor" && (
@@ -191,7 +173,6 @@ export default function BenchmarkPage() {
               report={report}
               vendor={vendor}
               industry={industry}
-              email={userEmail}
             />
           )}
         </div>

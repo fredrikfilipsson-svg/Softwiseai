@@ -24,7 +24,7 @@ export interface StoredContract {
   vendor: string;
   industry: string;
   contractText: string;
-  email: string;
+  email?: string;
   createdAt: string;
 }
 

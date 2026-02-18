@@ -7,16 +7,14 @@ interface ReportViewProps {
   report: BenchmarkReport;
   vendor: string;
   industry: string;
-  email: string;
 }
 
 export default function ReportView({
   report,
   vendor,
   industry,
-  email,
 }: ReportViewProps) {
-  const [downloadEmail, setDownloadEmail] = useState(email);
+  const [downloadEmail, setDownloadEmail] = useState("");
   const [showEmailGate, setShowEmailGate] = useState(false);
   const [downloading, setDownloading] = useState(false);
 

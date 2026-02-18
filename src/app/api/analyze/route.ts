@@ -9,9 +9,9 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const { vendor, industry, contractText, email } = await req.json();
+    const { vendor, industry, contractText } = await req.json();
 
-    if (!vendor || !industry || !contractText || !email) {
+    if (!vendor || !industry || !contractText) {
       return NextResponse.json(
         { error: "All fields are required." },
         { status: 400 }
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Save the contract for knowledge base building
-    saveContract({ vendor, industry, contractText, email });
+    saveContract({ vendor, industry, contractText });
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
