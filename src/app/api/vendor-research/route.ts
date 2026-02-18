@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { VendorResearch } from "@/lib/types";
 import { getAdminContextForVendor } from "@/lib/admin-data";
+import { getDemoVendorResearch } from "@/lib/demo-data";
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,10 +17,9 @@ export async function POST(req: NextRequest) {
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
-      return NextResponse.json(
-        { error: "API key not configured." },
-        { status: 500 }
-      );
+      // Demo mode — return realistic mock data
+      const research = getDemoVendorResearch(vendor, industry);
+      return NextResponse.json({ research, demo: true });
     }
 
     const adminContext = getAdminContextForVendor(vendor);

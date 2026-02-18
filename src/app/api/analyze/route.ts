@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { BenchmarkReport } from "@/lib/types";
 import { saveContract, saveBenchmarkEntry, getBenchmarkEntries } from "@/lib/storage";
 import { getAdminContextForVendor } from "@/lib/admin-data";
+import { getDemoBenchmarkReport } from "@/lib/demo-data";
 
 export const maxDuration = 60;
 
@@ -17,16 +18,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "API key not configured." },
-        { status: 500 }
-      );
-    }
-
     // Save the contract for knowledge base building
     saveContract({ vendor, industry, contractText, email });
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      // Demo mode — return realistic mock report
+      const report = getDemoBenchmarkReport(vendor, industry);
+      saveBenchmarkEntry({
+        vendor,
+        industry,
+        summary: report.executiveSummary.slice(0, 200),
+        pricingInsights: report.pricingBenchmark.savingsOpportunity,
+      });
+      return NextResponse.json({ report, demo: true });
+    }
 
     // Get existing benchmark knowledge for context
     const existingKnowledge = getBenchmarkEntries(vendor, industry);
