@@ -260,14 +260,28 @@ export const KNOWN_FILES: Record<string, string> = {
 
 /** Identify which Oracle table a filename corresponds to */
 export function identifyFile(filename: string): string | null {
+  // Only process CSV files
+  if (!filename.toLowerCase().endsWith(".csv")) return null;
+
   const upper = filename.toUpperCase();
+
+  // Exact match first
   for (const [pattern, table] of Object.entries(KNOWN_FILES)) {
     if (upper === pattern.toUpperCase()) return table;
   }
-  // Fuzzy: try to match without extension or with partial name
+
+  // Match by base name: the file base (without extension) must start with
+  // or exactly equal the known table base name, followed by nothing,
+  // a dot, underscore+digits, or space — but NOT more alpha characters.
+  // This prevents FND_USER_RESP_GROUPS.csv from matching FND_USER.
+  const fileBase = upper.replace(/\.CSV$/i, "");
   for (const [pattern, table] of Object.entries(KNOWN_FILES)) {
-    const base = pattern.replace(".csv", "").toUpperCase();
-    if (upper.includes(base)) return table;
+    const knownBase = pattern.replace(".csv", "").toUpperCase();
+    if (fileBase === knownBase) return table;
+    // Allow prefix match only if followed by non-alpha (e.g. _ALL, _V, _20240101)
+    if (fileBase.startsWith(knownBase) && !/[A-Z]/.test(fileBase[knownBase.length] || "")) {
+      return table;
+    }
   }
   return null;
 }
