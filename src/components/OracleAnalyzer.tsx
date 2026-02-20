@@ -282,6 +282,48 @@ export default function OracleAnalyzer() {
             Load different files
           </button>
 
+          {/* DEBUG PANEL — shows raw table data for troubleshooting */}
+          <div className="mb-6 rounded-lg border-2 border-red-300 bg-red-50 p-4">
+            <h3 className="text-sm font-bold text-red-800 mb-2">DEBUG: Raw Loaded Tables</h3>
+            <p className="text-xs text-red-700 mb-2">
+              Tables in state: {Object.keys(tables).length} |
+              Keys: [{Object.keys(tables).join(", ") || "NONE"}]
+            </p>
+            <div className="space-y-2">
+              {Object.entries(tables).map(([name, csv]) => (
+                <div key={name} className="rounded bg-white border border-red-200 p-2 text-xs font-mono">
+                  <strong>{name}</strong>: {csv.rows.length} rows, {csv.headers.length} cols,
+                  delim=&quot;{csv.detectedDelimiter === "\t" ? "TAB" : csv.detectedDelimiter}&quot;,
+                  skipped={csv.skippedLines}
+                  <br />
+                  Headers: [{csv.headers.slice(0, 10).join(", ")}{csv.headers.length > 10 ? ` ... +${csv.headers.length - 10} more` : ""}]
+                  {csv.rows.length > 0 && (
+                    <>
+                      <br />
+                      Sample row 1: {JSON.stringify(csv.rows[0]).substring(0, 300)}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+            {Object.keys(tables).length === 0 && (
+              <p className="text-xs text-red-600 font-bold mt-2">
+                WARNING: tables object is EMPTY — no CSV data was parsed!
+              </p>
+            )}
+            <div className="mt-3 border-t border-red-200 pt-2">
+              <p className="text-xs text-red-700">
+                Analysis result: {result.warnings.length} warnings,
+                {result.loadedFiles.length} loaded files in result,
+                {result.applications.length} apps,
+                {result.installedModules.length} modules
+              </p>
+              {result.warnings.map((w, i) => (
+                <p key={i} className="text-xs text-red-600 mt-1">Warning {i}: {w}</p>
+              ))}
+            </div>
+          </div>
+
           {/* Summary Cards */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
             <SummaryCard
