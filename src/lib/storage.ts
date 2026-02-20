@@ -129,3 +129,45 @@ export function getBenchmarkEntries(vendor?: string, industry?: string): Benchma
     return true;
   });
 }
+
+// Newsletter subscribers
+export interface NewsletterSubscriber {
+  id: string;
+  email: string;
+  name: string;
+  company?: string;
+  source: "landing_page" | "manual";
+  subscribedAt: string;
+}
+
+const SUBSCRIBERS_FILE = "newsletter-subscribers.json";
+
+export function saveSubscriber(data: Omit<NewsletterSubscriber, "id" | "subscribedAt">): NewsletterSubscriber | { error: string } {
+  const subscribers = readJsonFile<NewsletterSubscriber>(SUBSCRIBERS_FILE);
+  const exists = subscribers.find(
+    (s) => s.email.toLowerCase() === data.email.toLowerCase()
+  );
+  if (exists) {
+    return { error: "This email is already subscribed." };
+  }
+  const newSub: NewsletterSubscriber = {
+    ...data,
+    id: crypto.randomUUID(),
+    subscribedAt: new Date().toISOString(),
+  };
+  subscribers.push(newSub);
+  writeJsonFile(SUBSCRIBERS_FILE, subscribers);
+  return newSub;
+}
+
+export function getSubscribers(): NewsletterSubscriber[] {
+  return readJsonFile<NewsletterSubscriber>(SUBSCRIBERS_FILE);
+}
+
+export function deleteSubscriber(id: string): boolean {
+  const subscribers = readJsonFile<NewsletterSubscriber>(SUBSCRIBERS_FILE);
+  const filtered = subscribers.filter((s) => s.id !== id);
+  if (filtered.length === subscribers.length) return false;
+  writeJsonFile(SUBSCRIBERS_FILE, filtered);
+  return true;
+}
