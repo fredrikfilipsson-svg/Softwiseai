@@ -192,26 +192,41 @@ export default function OracleAnalyzer() {
               </div>
 
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {loadedFiles.map((f) => (
-                  <div
-                    key={f.name}
-                    className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
-                      f.status === "recognized"
-                        ? "border-green-200 bg-green-50"
-                        : f.status === "error"
-                        ? "border-red-200 bg-red-50"
-                        : "border-gray-200 bg-gray-50"
-                    }`}
-                  >
-                    <span className={`flex-shrink-0 h-2 w-2 rounded-full ${
-                      f.status === "recognized" ? "bg-green-500" : f.status === "error" ? "bg-red-500" : "bg-gray-400"
-                    }`} />
-                    <span className="truncate font-mono text-xs">{f.name}</span>
-                    {f.tableName && (
-                      <span className="ml-auto flex-shrink-0 text-[10px] text-green-600 font-medium">{f.tableName}</span>
-                    )}
-                  </div>
-                ))}
+                {loadedFiles.map((f) => {
+                  const parsed = f.tableName ? tables[f.tableName] : null;
+                  return (
+                    <div
+                      key={f.name}
+                      className={`rounded-lg border px-3 py-2 text-sm ${
+                        f.status === "recognized"
+                          ? "border-green-200 bg-green-50"
+                          : f.status === "error"
+                          ? "border-red-200 bg-red-50"
+                          : "border-gray-200 bg-gray-50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`flex-shrink-0 h-2 w-2 rounded-full ${
+                          f.status === "recognized" ? "bg-green-500" : f.status === "error" ? "bg-red-500" : "bg-gray-400"
+                        }`} />
+                        <span className="truncate font-mono text-xs">{f.name}</span>
+                        {f.tableName && (
+                          <span className="ml-auto flex-shrink-0 text-[10px] text-green-600 font-medium">{f.tableName}</span>
+                        )}
+                      </div>
+                      {parsed && (
+                        <div className="mt-1 ml-5 text-[10px] text-gray-500">
+                          {parsed.rows.length} rows, {parsed.headers.length} cols
+                          {parsed.detectedDelimiter && parsed.detectedDelimiter !== "," && (
+                            <span className="text-amber-600 ml-1">
+                              (delim: {parsed.detectedDelimiter === "\t" ? "TAB" : parsed.detectedDelimiter === "WHITESPACE" ? "SPACE" : parsed.detectedDelimiter})
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Missing files notice */}

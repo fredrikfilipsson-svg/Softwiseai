@@ -1,11 +1,70 @@
 /**
  * CSV Parser for Oracle LMS Collection files.
- * Handles quoted fields, commas inside quotes, and standard Oracle CSV exports.
+ * Handles: quoted fields, commas inside quotes, BOM, pipe-delimited,
+ * tab-delimited, semicolon-delimited, SQL*Plus spool format,
+ * and leading metadata/comment lines.
  */
 
 export interface ParsedCSV {
   headers: string[];
   rows: Record<string, string>[];
+  /** Diagnostic: the raw first meaningful line used as header */
+  rawHeaderLine: string;
+  /** Diagnostic: detected delimiter character */
+  detectedDelimiter: string;
+  /** Diagnostic: number of lines skipped before finding headers */
+  skippedLines: number;
+}
+
+/** Lines that are metadata / comments — not data */
+function isMetadataLine(line: string): boolean {
+  const t = line.trim();
+  if (t === "") return true;
+  if (t.startsWith("--")) return true;
+  if (t.startsWith("#")) return true;
+  if (/^REM\s/i.test(t)) return true;
+  if (/^SQL>/i.test(t)) return true;
+  if (/^SET\s/i.test(t)) return true;
+  if (/^SPOOL\s/i.test(t)) return true;
+  if (/^PROMPT\s/i.test(t)) return true;
+  if (/^\/\s*$/.test(t)) return true; // lone forward-slash (SQL*Plus run command)
+  // Line of only dashes and spaces (SQL*Plus column separator)
+  if (/^[-\s]+$/.test(t) && t.includes("-")) return true;
+  // Line of only dashes, spaces, and plus signs (SQL*Plus with pipes)
+  if (/^[-+\s]+$/.test(t)) return true;
+  // Line of only equals and spaces (another separator style)
+  if (/^[=\s]+$/.test(t) && t.includes("=")) return true;
+  return false;
+}
+
+/** Detect the best delimiter for a header line */
+function detectDelimiter(line: string): string {
+  // Count potential delimiters (outside of quotes)
+  let inQuotes = false;
+  const counts: Record<string, number> = { ",": 0, "\t": 0, ";": 0, "|": 0 };
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+    } else if (!inQuotes && ch in counts) {
+      counts[ch]++;
+    }
+  }
+
+  // Pick the delimiter with the most occurrences
+  let best = ",";
+  let bestCount = 0;
+  for (const [delim, count] of Object.entries(counts)) {
+    if (count > bestCount) {
+      bestCount = count;
+      best = delim;
+    }
+  }
+
+  // If no delimiter found at all, fall back to whitespace splitting
+  if (bestCount === 0) return "WHITESPACE";
+  return best;
 }
 
 /** Parse a CSV string into structured data */
@@ -15,32 +74,110 @@ export function parseCSV(text: string): ParsedCSV {
     text = text.slice(1);
   }
 
-  // Auto-detect delimiter: check first line for tab or semicolon usage
-  const firstLine = text.split(/\r?\n/, 1)[0];
-  const commaCount = (firstLine.match(/,/g) || []).length;
-  const tabCount = (firstLine.match(/\t/g) || []).length;
-  const semiCount = (firstLine.match(/;/g) || []).length;
-  let delimiter = ",";
-  if (tabCount > commaCount && tabCount > semiCount) delimiter = "\t";
-  else if (semiCount > commaCount && semiCount > tabCount) delimiter = ";";
+  // Split into raw lines first (respecting quoted fields)
+  const allLines = splitCSVLines(text);
+  if (allLines.length === 0) {
+    return { headers: [], rows: [], rawHeaderLine: "", detectedDelimiter: ",", skippedLines: 0 };
+  }
 
-  const lines = splitCSVLines(text);
-  if (lines.length === 0) return { headers: [], rows: [] };
+  // Skip metadata/comment/separator lines at the top to find the real header
+  let headerIndex = 0;
+  while (headerIndex < allLines.length && isMetadataLine(allLines[headerIndex])) {
+    headerIndex++;
+  }
 
-  const headers = parseCSVLine(lines[0], delimiter).map((h) => h.trim().toUpperCase().replace(/^["']+|["']+$/g, ""));
+  if (headerIndex >= allLines.length) {
+    return { headers: [], rows: [], rawHeaderLine: allLines[0] || "", detectedDelimiter: ",", skippedLines: headerIndex };
+  }
+
+  const rawHeaderLine = allLines[headerIndex];
+  const delimiter = detectDelimiter(rawHeaderLine);
+
+  // Parse the header line
+  let headers: string[];
+  if (delimiter === "WHITESPACE") {
+    // Fixed-width / whitespace-separated (e.g. SQL*Plus output)
+    headers = rawHeaderLine.trim().split(/\s{2,}|\t+/).map((h) => h.trim().toUpperCase());
+  } else {
+    headers = parseCSVLine(rawHeaderLine, delimiter).map((h) =>
+      h.trim().toUpperCase().replace(/^["']+|["']+$/g, "")
+    );
+  }
+
+  // Clean headers: remove any empty trailing headers
+  while (headers.length > 0 && headers[headers.length - 1] === "") {
+    headers.pop();
+  }
+
   const rows: Record<string, string>[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCSVLine(lines[i], delimiter);
+  // Skip any separator line right after headers (SQL*Plus style: "------  ------")
+  let dataStart = headerIndex + 1;
+  if (dataStart < allLines.length && isMetadataLine(allLines[dataStart])) {
+    dataStart++;
+  }
+
+  for (let i = dataStart; i < allLines.length; i++) {
+    const line = allLines[i];
+
+    // Skip metadata lines in the middle too
+    if (isMetadataLine(line)) continue;
+
+    // Stop at SQL*Plus "X rows selected" footer
+    if (/^\d+ rows? selected/i.test(line.trim())) break;
+
+    let values: string[];
+    if (delimiter === "WHITESPACE") {
+      // For fixed-width, try to align with header positions
+      values = splitFixedWidth(rawHeaderLine, line);
+    } else {
+      values = parseCSVLine(line, delimiter);
+    }
+
     if (values.length === 0 || (values.length === 1 && values[0].trim() === "")) continue;
+
     const row: Record<string, string> = {};
     for (let j = 0; j < headers.length; j++) {
-      row[headers[j]] = (values[j] ?? "").trim();
+      if (headers[j]) {
+        row[headers[j]] = (values[j] ?? "").trim();
+      }
     }
     rows.push(row);
   }
 
-  return { headers, rows };
+  return { headers, rows, rawHeaderLine, detectedDelimiter: delimiter, skippedLines: headerIndex };
+}
+
+/** Split fixed-width output based on header column positions */
+function splitFixedWidth(headerLine: string, dataLine: string): string[] {
+  // Find column boundaries by looking at spaces in the header
+  const boundaries: number[] = [0];
+  let inWord = false;
+  for (let i = 0; i < headerLine.length; i++) {
+    const isSpace = headerLine[i] === " " || headerLine[i] === "\t";
+    if (inWord && isSpace) {
+      // Check if this is a multi-space gap (column boundary)
+      let gapEnd = i;
+      while (gapEnd < headerLine.length && (headerLine[gapEnd] === " " || headerLine[gapEnd] === "\t")) {
+        gapEnd++;
+      }
+      if (gapEnd - i >= 2 && gapEnd < headerLine.length) {
+        boundaries.push(gapEnd);
+        i = gapEnd - 1;
+        inWord = false;
+      }
+    } else if (!isSpace) {
+      inWord = true;
+    }
+  }
+
+  const values: string[] = [];
+  for (let b = 0; b < boundaries.length; b++) {
+    const start = boundaries[b];
+    const end = b + 1 < boundaries.length ? boundaries[b + 1] : dataLine.length;
+    values.push(dataLine.substring(start, end).trim());
+  }
+  return values;
 }
 
 /** Split CSV text into lines, respecting quoted fields that span lines */

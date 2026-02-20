@@ -149,9 +149,23 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
     };
   }
 
-  // Diagnostic: check if tables have data and report column info
+  // ── Always report diagnostic info for critical tables ────────
+  const criticalTables = ["FND_APPLICATION", "FND_PRODUCT_INSTALLATIONS", "FND_USER", "FND_RESPONSIBILITY"];
+  for (const tName of criticalTables) {
+    const t = tables[tName];
+    if (!t) continue;
+    const hdr = t.headers.length > 0 ? t.headers.slice(0, 8).join(", ") + (t.headers.length > 8 ? ` ... (${t.headers.length} total)` : "") : "(no headers found)";
+    const delim = t.detectedDelimiter === "\t" ? "TAB" : t.detectedDelimiter === "WHITESPACE" ? "WHITESPACE" : `"${t.detectedDelimiter}"`;
+    warnings.push(
+      `[Debug] ${tName}: ${t.rows.length} rows, delimiter=${delim}, skipped=${t.skippedLines} lines, headers=[${hdr}]`
+    );
+  }
+
   if (tables.FND_APPLICATION.rows.length === 0) {
     warnings.push("FND_APPLICATION file was loaded but contains 0 data rows. The file may be empty or use an unsupported format.");
+    if (tables.FND_APPLICATION.rawHeaderLine) {
+      warnings.push(`FND_APPLICATION raw header line: "${tables.FND_APPLICATION.rawHeaderLine.substring(0, 200)}"`);
+    }
   }
   if (tables.FND_PRODUCT_INSTALLATIONS.rows.length === 0) {
     warnings.push("FND_PRODUCT_INSTALLATIONS file was loaded but contains 0 data rows. The file may be empty or use an unsupported format.");
