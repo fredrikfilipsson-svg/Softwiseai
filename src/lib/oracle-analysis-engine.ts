@@ -149,12 +149,29 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
     };
   }
 
+  // Diagnostic: check if tables have data and report column info
+  if (tables.FND_APPLICATION.rows.length === 0) {
+    warnings.push("FND_APPLICATION file was loaded but contains 0 data rows. The file may be empty or use an unsupported format.");
+  }
+  if (tables.FND_PRODUCT_INSTALLATIONS.rows.length === 0) {
+    warnings.push("FND_PRODUCT_INSTALLATIONS file was loaded but contains 0 data rows. The file may be empty or use an unsupported format.");
+  } else {
+    const sampleRow = tables.FND_PRODUCT_INSTALLATIONS.rows[0];
+    const statusVal = findColumn(sampleRow, "STATUS", "INSTALL_STATUS");
+    if (!statusVal) {
+      const cols = Object.keys(sampleRow).join(", ");
+      warnings.push(
+        `FND_PRODUCT_INSTALLATIONS: Could not find STATUS column. Available columns: ${cols}`
+      );
+    }
+  }
+
   // ── 1. Build application map ─────────────────────────────────
   const appMap = new Map<string, AppInfo>();
 
   for (const row of tables.FND_APPLICATION.rows) {
-    const appId = findColumn(row, "APPLICATION_ID");
-    const shortName = findColumn(row, "APPLICATION_SHORT_NAME");
+    const appId = findColumn(row, "APPLICATION_ID", "APP_ID", "APPL_ID");
+    const shortName = findColumn(row, "APPLICATION_SHORT_NAME", "APP_SHORT_NAME", "SHORT_NAME");
     if (appId) {
       appMap.set(appId, { applicationId: appId, shortName, displayName: shortName });
     }
@@ -209,9 +226,9 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
 
   if (tables.FND_RESPONSIBILITY) {
     for (const row of tables.FND_RESPONSIBILITY.rows) {
-      const respId = findColumn(row, "RESPONSIBILITY_ID");
-      const appId = findColumn(row, "APPLICATION_ID", "RESPONSIBILITY_APPLICATION_ID");
-      const respKey = findColumn(row, "RESPONSIBILITY_KEY");
+      const respId = findColumn(row, "RESPONSIBILITY_ID", "RESP_ID");
+      const appId = findColumn(row, "APPLICATION_ID", "RESPONSIBILITY_APPLICATION_ID", "RESP_APPLICATION_ID", "RESP_APPL_ID", "APP_ID", "APPL_ID");
+      const respKey = findColumn(row, "RESPONSIBILITY_KEY", "RESP_KEY");
       const startDate = findColumn(row, "START_DATE");
       const endDate = findColumn(row, "END_DATE");
       if (respId && appId) {
@@ -252,9 +269,9 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
   if (respGroupTable) {
     for (const row of respGroupTable.rows) {
       const userId = findColumn(row, "USER_ID");
-      const respId = findColumn(row, "RESPONSIBILITY_ID");
-      const appId = findColumn(row, "RESPONSIBILITY_APPLICATION_ID", "APPLICATION_ID");
-      const endDate = findColumn(row, "END_DATE");
+      const respId = findColumn(row, "RESPONSIBILITY_ID", "RESP_ID");
+      const appId = findColumn(row, "RESPONSIBILITY_APPLICATION_ID", "APPLICATION_ID", "RESP_APPLICATION_ID", "RESP_APPL_ID", "APP_ID", "APPL_ID");
+      const endDate = findColumn(row, "END_DATE", "END_DATE_ACTIVE");
 
       if (userId && respId && appId && isDateActive(endDate)) {
         if (!userRespAssignments.has(userId)) {
@@ -265,6 +282,16 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
     }
   } else {
     warnings.push("No FND_USER_RESP_GROUPS or FND_USER_RESPONSIBILITY file loaded. User-to-module mapping will be limited.");
+  }
+
+  // Diagnostic: warn if user-resp mapping produced nothing
+  if (respGroupTable && respGroupTable.rows.length > 0 && userRespAssignments.size === 0) {
+    const sampleRow = respGroupTable.rows[0];
+    const cols = Object.keys(sampleRow).join(", ");
+    warnings.push(
+      `FND_USER_RESP_GROUPS/FND_USER_RESPONSIBILITY has ${respGroupTable.rows.length} rows but no valid assignments were found. ` +
+      `This may indicate a column name mismatch. Available columns: ${cols}`
+    );
   }
 
   // ── 5. Build login history ────────────────────────────────────
@@ -317,12 +344,18 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
   const unusedModules: InstalledModule[] = [];
 
   for (const row of tables.FND_PRODUCT_INSTALLATIONS.rows) {
-    const appId = findColumn(row, "APPLICATION_ID");
-    const status = findColumn(row, "STATUS");
+    const appId = findColumn(row, "APPLICATION_ID", "APP_ID", "APPL_ID");
+    const rawStatus = findColumn(row, "STATUS", "INSTALL_STATUS").toUpperCase().trim();
     const patchLevel = findColumn(row, "PATCH_LEVEL");
 
     // Only process installed products (I = Installed, S = Shared Install)
-    if (status !== "I" && status !== "S") continue;
+    // Handle both single-char codes and full text values from Oracle exports
+    const isInstalled = rawStatus === "I" || rawStatus === "S" ||
+      rawStatus === "INSTALLED" || rawStatus === "SHARED" ||
+      rawStatus === "SHARED INSTALL" || rawStatus === "INSTALL" ||
+      rawStatus.startsWith("I ") || rawStatus.startsWith("S ");
+    if (!isInstalled) continue;
+    const status = (rawStatus === "S" || rawStatus === "SHARED" || rawStatus === "SHARED INSTALL") ? "S" : "I";
 
     const appInfo = appMap.get(appId);
     if (!appInfo) continue;

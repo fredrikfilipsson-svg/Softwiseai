@@ -10,14 +10,28 @@ export interface ParsedCSV {
 
 /** Parse a CSV string into structured data */
 export function parseCSV(text: string): ParsedCSV {
+  // Strip BOM (byte-order mark) that Windows CSV files often have
+  if (text.charCodeAt(0) === 0xfeff) {
+    text = text.slice(1);
+  }
+
+  // Auto-detect delimiter: check first line for tab or semicolon usage
+  const firstLine = text.split(/\r?\n/, 1)[0];
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  const semiCount = (firstLine.match(/;/g) || []).length;
+  let delimiter = ",";
+  if (tabCount > commaCount && tabCount > semiCount) delimiter = "\t";
+  else if (semiCount > commaCount && semiCount > tabCount) delimiter = ";";
+
   const lines = splitCSVLines(text);
   if (lines.length === 0) return { headers: [], rows: [] };
 
-  const headers = parseCSVLine(lines[0]).map((h) => h.trim().toUpperCase());
+  const headers = parseCSVLine(lines[0], delimiter).map((h) => h.trim().toUpperCase().replace(/^["']+|["']+$/g, ""));
   const rows: Record<string, string>[] = [];
 
   for (let i = 1; i < lines.length; i++) {
-    const values = parseCSVLine(lines[i]);
+    const values = parseCSVLine(lines[i], delimiter);
     if (values.length === 0 || (values.length === 1 && values[0].trim() === "")) continue;
     const row: Record<string, string> = {};
     for (let j = 0; j < headers.length; j++) {
@@ -53,7 +67,7 @@ function splitCSVLines(text: string): string[] {
 }
 
 /** Parse a single CSV line into field values */
-function parseCSVLine(line: string): string[] {
+function parseCSVLine(line: string, delimiter: string = ","): string[] {
   const fields: string[] = [];
   let current = "";
   let inQuotes = false;
@@ -67,7 +81,7 @@ function parseCSVLine(line: string): string[] {
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (ch === "," && !inQuotes) {
+    } else if (ch === delimiter && !inQuotes) {
       fields.push(current);
       current = "";
     } else {
