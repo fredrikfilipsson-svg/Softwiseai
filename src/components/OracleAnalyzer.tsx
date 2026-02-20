@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef } from "react";
 import { parseCSV, identifyFile, REQUIRED_FILES, OPTIONAL_FILES } from "@/lib/oracle-csv-parser";
 import { analyzeOracleEBS, type AnalysisResult, type LoadedTables } from "@/lib/oracle-analysis-engine";
+import { ORACLE_LICENSE_MAP } from "@/lib/oracle-license-map";
 
 interface LoadedFile {
   name: string;
@@ -11,7 +12,25 @@ interface LoadedFile {
   status: "recognized" | "unknown" | "error";
 }
 
-type Tab = "summary" | "licenses" | "modules" | "users" | "warnings";
+export interface OwnedLicense {
+  id: string;
+  productName: string;
+  quantity: number;
+  metric: string;
+  notes: string;
+}
+
+export interface ComplianceRow {
+  productName: string;
+  family: string;
+  metric: string;
+  ownedQty: number;
+  deployedQty: number;
+  gap: number;
+  status: "compliant" | "under-licensed" | "over-licensed" | "not-deployed" | "not-owned";
+}
+
+type Tab = "summary" | "licenses" | "modules" | "users" | "warnings" | "compliance";
 
 export default function OracleAnalyzer() {
   const [loadedFiles, setLoadedFiles] = useState<LoadedFile[]>([]);
@@ -21,6 +40,7 @@ export default function OracleAnalyzer() {
   const [dragOver, setDragOver] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("summary");
   const [expandedModule, setExpandedModule] = useState<string | null>(null);
+  const [ownedLicenses, setOwnedLicenses] = useState<OwnedLicense[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processFiles = useCallback(
@@ -281,6 +301,7 @@ export default function OracleAnalyzer() {
               {([
                 { key: "summary", label: "License Summary" },
                 { key: "licenses", label: "Required Licenses" },
+                { key: "compliance", label: "Compliance" },
                 { key: "modules", label: "Installed Modules" },
                 { key: "users", label: "User Statistics" },
                 { key: "warnings", label: `Findings (${result.warnings.length})` },
@@ -303,6 +324,13 @@ export default function OracleAnalyzer() {
           {/* Tab Content */}
           {activeTab === "summary" && <TabSummary result={result} />}
           {activeTab === "licenses" && <TabLicenses result={result} />}
+          {activeTab === "compliance" && (
+            <TabCompliance
+              result={result}
+              ownedLicenses={ownedLicenses}
+              setOwnedLicenses={setOwnedLicenses}
+            />
+          )}
           {activeTab === "modules" && (
             <TabModules
               result={result}
@@ -642,6 +670,436 @@ function TabWarnings({ result }: { result: AnalysisResult }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Compliance Tab ──────────────────────────────────────────────
+
+/** Build a unique list of all known Oracle product names for the autocomplete */
+function getAllProductNames(result: AnalysisResult): string[] {
+  const names = new Set<string>();
+  // From the analysis results
+  for (const ls of result.licenseSummary) names.add(ls.productName);
+  // From the full license map (so the user can also add products not detected in deployment)
+  for (const entry of Object.values(ORACLE_LICENSE_MAP)) {
+    if (!entry.isBase) names.add(entry.productName);
+  }
+  return Array.from(names).sort();
+}
+
+function buildComplianceRows(result: AnalysisResult, owned: OwnedLicense[]): ComplianceRow[] {
+  const rows: ComplianceRow[] = [];
+  const matchedOwned = new Set<string>();
+
+  // 1. For every deployed (required) license, check if owned
+  for (const ls of result.licenseSummary) {
+    const ownedEntry = owned.find(
+      (o) => o.productName.toLowerCase() === ls.productName.toLowerCase()
+    );
+    const ownedQty = ownedEntry ? ownedEntry.quantity : 0;
+    if (ownedEntry) matchedOwned.add(ownedEntry.id);
+
+    const deployedQty = ls.activeUsers;
+    const gap = deployedQty - ownedQty;
+
+    let status: ComplianceRow["status"];
+    if (ownedQty === 0) status = "not-owned";
+    else if (gap > 0) status = "under-licensed";
+    else if (gap < 0) status = "over-licensed";
+    else status = "compliant";
+
+    rows.push({
+      productName: ls.productName,
+      family: ls.family,
+      metric: ls.metric,
+      ownedQty,
+      deployedQty,
+      gap,
+      status,
+    });
+  }
+
+  // 2. Owned licenses that don't match any deployed product
+  for (const o of owned) {
+    if (matchedOwned.has(o.id)) continue;
+    rows.push({
+      productName: o.productName,
+      family: "—",
+      metric: o.metric,
+      ownedQty: o.quantity,
+      deployedQty: 0,
+      gap: -o.quantity,
+      status: "not-deployed",
+    });
+  }
+
+  return rows;
+}
+
+function TabCompliance({
+  result,
+  ownedLicenses,
+  setOwnedLicenses,
+}: {
+  result: AnalysisResult;
+  ownedLicenses: OwnedLicense[];
+  setOwnedLicenses: (v: OwnedLicense[]) => void;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [formProduct, setFormProduct] = useState("");
+  const [formQty, setFormQty] = useState("");
+  const [formMetric, setFormMetric] = useState("Application User");
+  const [formNotes, setFormNotes] = useState("");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const allProducts = getAllProductNames(result);
+  const complianceRows = buildComplianceRows(result, ownedLicenses);
+
+  const counts = {
+    compliant: complianceRows.filter((r) => r.status === "compliant").length,
+    underLicensed: complianceRows.filter((r) => r.status === "under-licensed" || r.status === "not-owned").length,
+    overLicensed: complianceRows.filter((r) => r.status === "over-licensed").length,
+    notDeployed: complianceRows.filter((r) => r.status === "not-deployed").length,
+  };
+  const totalGapUsers = complianceRows
+    .filter((r) => r.gap > 0)
+    .reduce((sum, r) => sum + r.gap, 0);
+
+  const resetForm = () => {
+    setFormProduct("");
+    setFormQty("");
+    setFormMetric("Application User");
+    setFormNotes("");
+    setShowForm(false);
+    setEditId(null);
+    setShowSuggestions(false);
+  };
+
+  const handleSave = () => {
+    if (!formProduct.trim() || !formQty) return;
+    const qty = parseInt(formQty, 10);
+    if (isNaN(qty) || qty < 0) return;
+
+    if (editId) {
+      setOwnedLicenses(
+        ownedLicenses.map((o) =>
+          o.id === editId
+            ? { ...o, productName: formProduct.trim(), quantity: qty, metric: formMetric, notes: formNotes }
+            : o
+        )
+      );
+    } else {
+      setOwnedLicenses([
+        ...ownedLicenses,
+        {
+          id: crypto.randomUUID(),
+          productName: formProduct.trim(),
+          quantity: qty,
+          metric: formMetric,
+          notes: formNotes,
+        },
+      ]);
+    }
+    resetForm();
+  };
+
+  const handleEdit = (lic: OwnedLicense) => {
+    setEditId(lic.id);
+    setFormProduct(lic.productName);
+    setFormQty(String(lic.quantity));
+    setFormMetric(lic.metric);
+    setFormNotes(lic.notes);
+    setShowForm(true);
+  };
+
+  const handleDelete = (id: string) => {
+    setOwnedLicenses(ownedLicenses.filter((o) => o.id !== id));
+  };
+
+  const handleProductInput = (value: string) => {
+    setFormProduct(value);
+    if (value.length >= 2) {
+      const filtered = allProducts.filter((p) =>
+        p.toLowerCase().includes(value.toLowerCase())
+      );
+      setSuggestions(filtered.slice(0, 8));
+      setShowSuggestions(filtered.length > 0);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
+  const selectSuggestion = (name: string) => {
+    setFormProduct(name);
+    setShowSuggestions(false);
+    // Auto-fill metric if we know it from the license map
+    const mapEntry = Object.values(ORACLE_LICENSE_MAP).find(
+      (e) => e.productName === name
+    );
+    if (mapEntry && !mapEntry.isBase) {
+      setFormMetric(mapEntry.metric);
+    }
+  };
+
+  const statusColors: Record<string, string> = {
+    compliant: "bg-green-100 text-green-800 border-green-200",
+    "under-licensed": "bg-red-100 text-red-800 border-red-200",
+    "over-licensed": "bg-amber-100 text-amber-800 border-amber-200",
+    "not-deployed": "bg-gray-100 text-gray-600 border-gray-200",
+    "not-owned": "bg-red-100 text-red-800 border-red-200",
+  };
+  const statusLabels: Record<string, string> = {
+    compliant: "Compliant",
+    "under-licensed": "Under-Licensed",
+    "over-licensed": "Over-Licensed",
+    "not-deployed": "Not Deployed",
+    "not-owned": "Not Owned",
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Compliance summary cards */}
+      {ownedLicenses.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border p-4 bg-green-50 text-green-700 border-green-200">
+            <p className="text-xs font-medium opacity-80">Compliant</p>
+            <p className="text-2xl font-bold">{counts.compliant}</p>
+            <p className="text-xs opacity-60">products covered</p>
+          </div>
+          <div className="rounded-xl border p-4 bg-red-50 text-red-700 border-red-200">
+            <p className="text-xs font-medium opacity-80">Under-Licensed</p>
+            <p className="text-2xl font-bold">{counts.underLicensed}</p>
+            <p className="text-xs opacity-60">{totalGapUsers} users short</p>
+          </div>
+          <div className="rounded-xl border p-4 bg-amber-50 text-amber-700 border-amber-200">
+            <p className="text-xs font-medium opacity-80">Over-Licensed</p>
+            <p className="text-2xl font-bold">{counts.overLicensed}</p>
+            <p className="text-xs opacity-60">potential savings</p>
+          </div>
+          <div className="rounded-xl border p-4 bg-gray-50 text-gray-600 border-gray-200">
+            <p className="text-xs font-medium opacity-80">Not Deployed</p>
+            <p className="text-2xl font-bold">{counts.notDeployed}</p>
+            <p className="text-xs opacity-60">owned but unused</p>
+          </div>
+        </div>
+      )}
+
+      {/* Owned licenses section */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Customer Owned Licenses</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Enter the licenses the customer has purchased. These will be compared against the deployment data.
+            </p>
+          </div>
+          {!showForm && (
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+              + Add License
+            </button>
+          )}
+        </div>
+
+        {/* Add/Edit form */}
+        {showForm && (
+          <div className="mb-6 rounded-lg border border-brand-200 bg-brand-50/30 p-4">
+            <h4 className="text-sm font-semibold text-gray-700 mb-3">
+              {editId ? "Edit License" : "Add Owned License"}
+            </h4>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {/* Product name with autocomplete */}
+              <div className="relative sm:col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Product Name</label>
+                <input
+                  type="text"
+                  value={formProduct}
+                  onChange={(e) => handleProductInput(e.target.value)}
+                  onFocus={() => { if (formProduct.length >= 2) setShowSuggestions(suggestions.length > 0); }}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                  placeholder="Start typing, e.g. Oracle General Ledger"
+                  className="input-field"
+                />
+                {showSuggestions && (
+                  <div className="absolute z-10 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow-lg max-h-48 overflow-y-auto">
+                    {suggestions.map((s) => (
+                      <button
+                        key={s}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => selectSuggestion(s)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-brand-50 transition-colors"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Quantity */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Quantity</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formQty}
+                  onChange={(e) => setFormQty(e.target.value)}
+                  placeholder="e.g. 150"
+                  className="input-field"
+                />
+              </div>
+
+              {/* Metric */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Metric</label>
+                <select
+                  value={formMetric}
+                  onChange={(e) => setFormMetric(e.target.value)}
+                  className="input-field"
+                >
+                  <option>Application User</option>
+                  <option>Self-Service User</option>
+                  <option>Processor</option>
+                  <option>Named User Plus</option>
+                  <option>Employee</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Notes (optional)</label>
+              <input
+                type="text"
+                value={formNotes}
+                onChange={(e) => setFormNotes(e.target.value)}
+                placeholder="e.g. CSI# 12345, purchased 2023"
+                className="input-field"
+              />
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <button onClick={handleSave} className="btn-primary text-sm">
+                {editId ? "Update" : "Add"}
+              </button>
+              <button onClick={resetForm} className="btn-secondary text-sm">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Owned licenses table */}
+        {ownedLicenses.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wider text-gray-400">
+                  <th className="pb-2 pr-4">Product</th>
+                  <th className="pb-2 pr-4 text-right">Quantity</th>
+                  <th className="pb-2 pr-4">Metric</th>
+                  <th className="pb-2 pr-4">Notes</th>
+                  <th className="pb-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {ownedLicenses.map((lic) => (
+                  <tr key={lic.id} className="hover:bg-gray-50/50">
+                    <td className="py-2.5 pr-4 font-medium text-gray-900">{lic.productName}</td>
+                    <td className="py-2.5 pr-4 text-right font-semibold">{lic.quantity.toLocaleString()}</td>
+                    <td className="py-2.5 pr-4">
+                      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700">
+                        {lic.metric}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-4 text-gray-500 text-xs">{lic.notes || "—"}</td>
+                    <td className="py-2.5 text-right">
+                      <button
+                        onClick={() => handleEdit(lic)}
+                        className="text-xs text-brand-500 hover:text-brand-700 mr-3"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(lic.id)}
+                        className="text-xs text-red-400 hover:text-red-600"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-400 text-sm">
+            No owned licenses entered yet. Click &quot;Add License&quot; to start the compliance comparison.
+          </div>
+        )}
+      </div>
+
+      {/* Gap Analysis Table */}
+      {ownedLicenses.length > 0 && (
+        <div className="card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Compliance Gap Analysis</h3>
+          <p className="text-xs text-gray-500 mb-4">
+            Comparison of owned licenses vs. deployed/required usage from the LMS collection data.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wider text-gray-400">
+                  <th className="pb-3 pr-4">Product</th>
+                  <th className="pb-3 pr-4">Family</th>
+                  <th className="pb-3 pr-4">Metric</th>
+                  <th className="pb-3 pr-4 text-right">Owned</th>
+                  <th className="pb-3 pr-4 text-right">Required</th>
+                  <th className="pb-3 pr-4 text-right">Gap</th>
+                  <th className="pb-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {complianceRows.map((row) => (
+                  <tr key={row.productName} className="hover:bg-gray-50/50">
+                    <td className="py-3 pr-4 font-medium text-gray-900">{row.productName}</td>
+                    <td className="py-3 pr-4 text-gray-600">{row.family}</td>
+                    <td className="py-3 pr-4 text-xs text-gray-500">{row.metric}</td>
+                    <td className="py-3 pr-4 text-right font-semibold">{row.ownedQty.toLocaleString()}</td>
+                    <td className="py-3 pr-4 text-right font-semibold">{row.deployedQty.toLocaleString()}</td>
+                    <td className={`py-3 pr-4 text-right font-bold ${
+                      row.gap > 0 ? "text-red-600" : row.gap < 0 ? "text-amber-600" : "text-green-600"
+                    }`}>
+                      {row.gap > 0 ? `+${row.gap}` : row.gap === 0 ? "0" : String(row.gap)}
+                    </td>
+                    <td className="py-3">
+                      <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                        statusColors[row.status]
+                      }`}>
+                        {statusLabels[row.status]}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Compliance explanation */}
+          <div className="mt-6 rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+            <h4 className="text-sm font-semibold text-blue-800 mb-2">Reading this Table</h4>
+            <ul className="text-xs text-blue-700 space-y-1 list-disc list-inside">
+              <li><strong className="text-green-700">Compliant</strong> — Owned quantity meets or exceeds the deployed/required count.</li>
+              <li><strong className="text-red-700">Under-Licensed</strong> — More users are deployed than licenses owned. Gap column shows how many additional licenses are needed.</li>
+              <li><strong className="text-red-700">Not Owned</strong> — Product is deployed but no license is recorded. Compliance risk.</li>
+              <li><strong className="text-amber-700">Over-Licensed</strong> — More licenses owned than required. Potential cost-savings opportunity.</li>
+              <li><strong className="text-gray-600">Not Deployed</strong> — License is owned but the product is not deployed. Consider re-harvesting.</li>
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
