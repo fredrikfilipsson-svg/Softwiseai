@@ -53,6 +53,18 @@ function downloadCSV(filename: string, headers: string[], rows: string[][]) {
   URL.revokeObjectURL(url);
 }
 
+/** Check if a login date string is on or after a given cutoff date string (YYYY-MM-DD) */
+function isLoginAfter(loginDateStr: string, cutoff: string): boolean {
+  if (!loginDateStr || !cutoff) return true;
+  // Try parsing common formats: MM/DD/YYYY HH:MM:SS, YYYY-MM-DD, DD-MON-YYYY
+  const d = new Date(loginDateStr);
+  if (!isNaN(d.getTime())) {
+    const c = new Date(cutoff + "T00:00:00");
+    return d >= c;
+  }
+  return true; // unparseable = include
+}
+
 export default function OracleAnalyzer() {
   const [loadedFiles, setLoadedFiles] = useState<LoadedFile[]>([]);
   const [tables, setTables] = useState<LoadedTables>({});
@@ -418,6 +430,8 @@ function SummaryCard({ label, value, sub, color }: { label: string; value: numbe
 
 function TabSummary({ result }: { result: AnalysisResult }) {
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
+  const [activeOnly, setActiveOnly] = useState(false);
+  const [loginAfter, setLoginAfter] = useState("");
 
   // Group licenses by family
   const byFamily = new Map<string, typeof result.licenseSummary>();
@@ -444,7 +458,12 @@ function TabSummary({ result }: { result: AnalysisResult }) {
   }
 
   const exportProductUsers = (productName: string) => {
-    const users = productUsersMap.get(productName) || [];
+    const allUsers = productUsersMap.get(productName) || [];
+    const users = allUsers.filter((u) => {
+      if (activeOnly && !u.isActive) return false;
+      if (loginAfter && !isLoginAfter(u.lastLogonDate, loginAfter)) return false;
+      return true;
+    });
     const headers = ["User Name", "User ID", "Active", "Last Logon Date", "User Type"];
     const rows = users.map((u) => [
       u.userName,
@@ -454,7 +473,7 @@ function TabSummary({ result }: { result: AnalysisResult }) {
       u.isSelfService ? "Self-Service" : "Application",
     ]);
     const safeName = productName.replace(/[^a-zA-Z0-9_-]/g, "_");
-    downloadCSV(`${safeName}_users.csv`, headers, rows);
+    downloadCSV(`${safeName}_users${activeOnly ? "_active" : ""}.csv`, headers, rows);
   };
 
   return (
@@ -506,15 +525,47 @@ function TabSummary({ result }: { result: AnalysisResult }) {
                         <td className="py-2.5 pr-4 text-right font-semibold">{p.activeUsers.toLocaleString()}</td>
                         <td className="py-2.5 text-right text-gray-500">{p.totalUsers.toLocaleString()}</td>
                       </tr>
-                      {isExpanded && (
+                      {isExpanded && (() => {
+                        const displayUsers = users.filter((u) => {
+                          if (activeOnly && !u.isActive) return false;
+                          if (loginAfter && !isLoginAfter(u.lastLogonDate, loginAfter)) return false;
+                          return true;
+                        });
+                        return (
                         <tr>
                           <td colSpan={4} className="p-0">
                             <div className="bg-gray-50/70 border-y border-gray-100 px-6 py-4">
-                              <div className="flex items-center justify-between mb-3">
-                                <p className="text-xs font-medium text-gray-600">
-                                  {users.length} users assigned to {p.productName}
-                                </p>
-                                {users.length > 0 && (
+                              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                                <div className="flex flex-wrap items-center gap-4">
+                                  <p className="text-xs font-medium text-gray-600">
+                                    {displayUsers.length} users{activeOnly || loginAfter ? " (filtered)" : ""} assigned to {p.productName}
+                                    {displayUsers.length !== users.length && (
+                                      <span className="text-gray-400 ml-1">({users.length} total)</span>
+                                    )}
+                                  </p>
+                                  <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                                    <input
+                                      type="checkbox"
+                                      checked={activeOnly}
+                                      onChange={(e) => setActiveOnly(e.target.checked)}
+                                      className="rounded border-gray-300 text-brand-500 focus:ring-brand-500 h-3.5 w-3.5"
+                                    />
+                                    Active only
+                                  </label>
+                                  <div className="flex items-center gap-1.5 text-xs text-gray-600" onClick={(e) => e.stopPropagation()}>
+                                    <span>Login after:</span>
+                                    <input
+                                      type="date"
+                                      value={loginAfter}
+                                      onChange={(e) => setLoginAfter(e.target.value)}
+                                      className="rounded border border-gray-300 px-2 py-0.5 text-xs focus:border-brand-500 focus:ring-brand-500"
+                                    />
+                                    {loginAfter && (
+                                      <button onClick={() => setLoginAfter("")} className="text-gray-400 hover:text-red-500 text-xs">clear</button>
+                                    )}
+                                  </div>
+                                </div>
+                                {displayUsers.length > 0 && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); exportProductUsers(p.productName); }}
                                     className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -526,7 +577,7 @@ function TabSummary({ result }: { result: AnalysisResult }) {
                                   </button>
                                 )}
                               </div>
-                              {users.length > 0 ? (
+                              {displayUsers.length > 0 ? (
                                 <div className="overflow-x-auto rounded-lg border border-gray-200">
                                   <table className="w-full text-xs">
                                     <thead>
@@ -539,7 +590,7 @@ function TabSummary({ result }: { result: AnalysisResult }) {
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100 bg-white">
-                                      {users.slice(0, 50).map((u, i) => (
+                                      {displayUsers.slice(0, 50).map((u, i) => (
                                         <tr key={i} className="hover:bg-gray-50/50">
                                           <td className="px-3 py-1.5 font-medium text-gray-900">{u.userName}</td>
                                           <td className="px-3 py-1.5 text-gray-500 font-mono">{u.userId}</td>
@@ -562,19 +613,22 @@ function TabSummary({ result }: { result: AnalysisResult }) {
                                       ))}
                                     </tbody>
                                   </table>
-                                  {users.length > 50 && (
+                                  {displayUsers.length > 50 && (
                                     <div className="px-3 py-2 text-xs text-gray-400 bg-gray-50 border-t border-gray-200">
-                                      Showing first 50 of {users.length} users. Export to Excel for the full list.
+                                      Showing first 50 of {displayUsers.length} users. Export to Excel for the full list.
                                     </div>
                                   )}
                                 </div>
                               ) : (
-                                <p className="text-xs text-gray-400 italic">No users assigned.</p>
+                                <p className="text-xs text-gray-400 italic">
+                                  {activeOnly ? "No active users assigned." : "No users assigned."}
+                                </p>
                               )}
                             </div>
                           </td>
                         </tr>
-                      )}
+                        );
+                      })()}
                     </React.Fragment>
                   );
                 })}
@@ -656,9 +710,17 @@ function TabModules({
   expandedModule: string | null;
   setExpandedModule: (v: string | null) => void;
 }) {
+  const [activeOnly, setActiveOnly] = useState(false);
+  const [loginAfter, setLoginAfter] = useState("");
+
   const exportModuleUsers = (mod: typeof result.installedModules[0]) => {
+    const users = mod.users.filter((u) => {
+      if (activeOnly && !u.isActive) return false;
+      if (loginAfter && !isLoginAfter(u.lastLogonDate, loginAfter)) return false;
+      return true;
+    });
     const headers = ["User Name", "User ID", "Active", "Last Logon Date", "User Type"];
-    const rows = mod.users.map((u) => [
+    const rows = users.map((u) => [
       u.userName,
       u.userId,
       u.isActive ? "Yes" : "No",
@@ -666,7 +728,7 @@ function TabModules({
       u.isSelfService ? "Self-Service" : "Application",
     ]);
     const safeName = mod.shortName.replace(/[^a-zA-Z0-9_-]/g, "_");
-    downloadCSV(`${safeName}_users.csv`, headers, rows);
+    downloadCSV(`${safeName}_users${activeOnly ? "_active" : ""}.csv`, headers, rows);
   };
 
   return (
@@ -728,11 +790,17 @@ function TabModules({
                   </div>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-4 mb-4">
-                  <div className="rounded-lg bg-white border border-gray-200 p-3 text-center">
+                  <div
+                    className="rounded-lg bg-white border border-gray-200 p-3 text-center cursor-pointer hover:border-gray-400 transition-colors"
+                    onClick={() => { setActiveOnly(false); document.getElementById(`mod-users-${mod.shortName}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }}
+                  >
                     <p className="text-2xl font-bold text-gray-900">{mod.totalUsers}</p>
                     <p className="text-xs text-gray-500">Total Users</p>
                   </div>
-                  <div className="rounded-lg bg-white border border-gray-200 p-3 text-center">
+                  <div
+                    className="rounded-lg bg-white border border-green-300 p-3 text-center cursor-pointer hover:border-green-500 hover:bg-green-50/50 transition-colors"
+                    onClick={() => { setActiveOnly(true); document.getElementById(`mod-users-${mod.shortName}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }}
+                  >
                     <p className="text-2xl font-bold text-green-600">{mod.activeUsers}</p>
                     <p className="text-xs text-gray-500">Active Users</p>
                   </div>
@@ -758,10 +826,42 @@ function TabModules({
                   </div>
                 )}
                 {/* User Details Table */}
-                {mod.users.length > 0 && (
+                <div id={`mod-users-${mod.shortName}`} />
+                {mod.users.length > 0 && (() => {
+                  const displayUsers = mod.users.filter((u) => {
+                    if (activeOnly && !u.isActive) return false;
+                    if (loginAfter && !isLoginAfter(u.lastLogonDate, loginAfter)) return false;
+                    return true;
+                  });
+                  return (
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs text-gray-400">Users ({mod.users.length})</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <div className="flex flex-wrap items-center gap-4">
+                        <p className="text-xs text-gray-400">
+                          Users ({displayUsers.length}{displayUsers.length !== mod.users.length ? ` of ${mod.users.length}` : ""})
+                        </p>
+                        <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={activeOnly}
+                            onChange={(e) => setActiveOnly(e.target.checked)}
+                            className="rounded border-gray-300 text-brand-500 focus:ring-brand-500 h-3.5 w-3.5"
+                          />
+                          Active only
+                        </label>
+                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                          <span>Login after:</span>
+                          <input
+                            type="date"
+                            value={loginAfter}
+                            onChange={(e) => setLoginAfter(e.target.value)}
+                            className="rounded border border-gray-300 px-2 py-0.5 text-xs focus:border-brand-500 focus:ring-brand-500"
+                          />
+                          {loginAfter && (
+                            <button onClick={() => setLoginAfter("")} className="text-gray-400 hover:text-red-500 text-xs">clear</button>
+                          )}
+                        </div>
+                      </div>
                       <button
                         onClick={(e) => { e.stopPropagation(); exportModuleUsers(mod); }}
                         className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -784,7 +884,7 @@ function TabModules({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 bg-white">
-                          {mod.users.slice(0, 100).map((u, i) => (
+                          {displayUsers.slice(0, 100).map((u, i) => (
                             <tr key={i} className="hover:bg-gray-50/50">
                               <td className="px-3 py-1.5 font-medium text-gray-900">{u.userName}</td>
                               <td className="px-3 py-1.5 text-gray-500 font-mono">{u.userId}</td>
@@ -807,14 +907,20 @@ function TabModules({
                           ))}
                         </tbody>
                       </table>
-                      {mod.users.length > 100 && (
+                      {displayUsers.length > 100 && (
                         <div className="px-3 py-2 text-xs text-gray-400 bg-gray-50 border-t border-gray-200">
-                          Showing first 100 of {mod.users.length} users. Export to Excel for the full list.
+                          Showing first 100 of {displayUsers.length} users. Export to Excel for the full list.
+                        </div>
+                      )}
+                      {displayUsers.length === 0 && (
+                        <div className="px-3 py-4 text-xs text-gray-400 text-center">
+                          {activeOnly ? "No active users assigned to this module." : "No users to display."}
                         </div>
                       )}
                     </div>
                   </div>
-                )}
+                  );
+                })()}
                 {mod.users.length === 0 && (
                   <p className="text-xs text-gray-400 italic">No users assigned to this module.</p>
                 )}
