@@ -33,12 +33,65 @@ const KNOWN_ORACLE_COLUMNS = new Set([
   "END_DATE_ACTIVE", "CREATION_DATE", "LAST_UPDATE_DATE", "CREATED_BY",
 ]);
 
+// ─── Oracle LMS special tokens ─────────────────────────────────
+// Oracle LMS collection scripts often wrap fields with ^~*~^ as a
+// delimiter, or use CHR(35) (the '#' character) as a field wrapper
+// via SQL concatenation: CHR(35)||COLUMN_NAME||CHR(35)
+
+/** The Oracle LMS "caret" delimiter used in many collection scripts */
+const LMS_CARET_DELIM = "^~*~^";
+
+/**
+ * Clean Oracle SQL artifacts from a raw line.
+ * Handles:
+ *   - CHR(n)||  and  ||CHR(n)  concatenation expressions
+ *   - Literal ^~*~^ tokens when NOT used as the delimiter
+ *   - '#' wrappers around values (since CHR(35) = '#')
+ */
+function cleanOracleSQL(value: string): string {
+  let v = value;
+  // Strip CHR(n)|| and ||CHR(n) — Oracle SQL concat expressions
+  v = v.replace(/CHR\(\d+\)\s*\|\|/gi, "");
+  v = v.replace(/\|\|\s*CHR\(\d+\)/gi, "");
+  // Strip remaining standalone CHR(n) calls
+  v = v.replace(/CHR\(\d+\)/gi, "");
+  // Strip surrounding '#' left over from CHR(35) wrappers
+  v = v.replace(/^#+|#+$/g, "");
+  // Strip surrounding single-quotes left from SQL string literals
+  v = v.replace(/^'+|'+$/g, "");
+  return v.trim();
+}
+
+/**
+ * Check whether a line uses ^~*~^ as the field delimiter.
+ * Returns true if the token appears at least twice (start/end or between fields).
+ */
+function isCaretDelimited(line: string): boolean {
+  const count = line.split(LMS_CARET_DELIM).length - 1;
+  return count >= 2;
+}
+
+/**
+ * Parse a ^~*~^ delimited line into field values.
+ * Example: ^~*~^FOO^~*~^BAR^~*~^  → ["FOO", "BAR"]
+ */
+function parseCaretLine(line: string): string[] {
+  // Split on the caret delimiter
+  const parts = line.split(LMS_CARET_DELIM);
+  // Filter out empty leading/trailing segments caused by wrapping carets
+  return parts
+    .map((p) => p.trim())
+    .filter((p) => p !== "");
+}
+
 /** Lines that are metadata / comments — not data */
 function isMetadataLine(line: string): boolean {
   const t = line.trim();
   if (t === "") return true;
   if (t.startsWith("--")) return true;
-  if (t.startsWith("#")) return true;
+  // Only treat '#' lines as comments if they look like actual comments,
+  // NOT like #VALUE#,#VALUE# (CHR(35) wrapped data)
+  if (t.startsWith("#") && !/#[^#]+#[,|;\t]/.test(t) && !/^#[^#]*#$/.test(t)) return true;
   if (/^REM\s/i.test(t)) return true;
   if (/^SQL>/i.test(t)) return true;
   if (/^SET\s/i.test(t)) return true;
@@ -64,6 +117,10 @@ function isMetadataLine(line: string): boolean {
 
 /** Count delimiter characters in a line (outside quotes) */
 function countDelimiters(line: string): number {
+  // Check for caret delimiter first
+  if (isCaretDelimited(line)) {
+    return line.split(LMS_CARET_DELIM).length - 1;
+  }
   let count = 0;
   let inQuotes = false;
   for (let i = 0; i < line.length; i++) {
@@ -76,7 +133,13 @@ function countDelimiters(line: string): number {
 
 /** Check if parsed headers contain any known Oracle column names */
 function hasKnownColumns(headers: string[]): boolean {
-  return headers.some(h => KNOWN_ORACLE_COLUMNS.has(h));
+  return headers.some(h => {
+    if (KNOWN_ORACLE_COLUMNS.has(h)) return true;
+    // Also try after cleaning Oracle SQL artifacts in case headers
+    // still have residual expressions
+    const cleaned = cleanOracleSQL(h).toUpperCase();
+    return cleaned !== h && KNOWN_ORACLE_COLUMNS.has(cleaned);
+  });
 }
 
 /** Check if a line looks like a title/table-name rather than a real header row */
@@ -95,18 +158,32 @@ function isTitleLine(line: string, nextLine?: string): boolean {
 
 /** Detect the best delimiter for a header line */
 function detectDelimiter(line: string): string {
+  // 1. Check for Oracle LMS ^~*~^ caret delimiter first
+  if (isCaretDelimited(line)) return LMS_CARET_DELIM;
+
+  // 2. Before counting standard delimiters, strip Oracle SQL artifacts
+  //    so that || in CHR(35)||COLUMN doesn't inflate pipe counts
+  const cleanedLine = line
+    .replace(/CHR\(\d+\)\s*\|\|/gi, "")
+    .replace(/\|\|\s*CHR\(\d+\)/gi, "")
+    .replace(/\|\|/g, ""); // strip remaining SQL concat operators
+
   // Count potential delimiters (outside of quotes)
   let inQuotes = false;
   const counts: Record<string, number> = { ",": 0, "\t": 0, ";": 0, "|": 0 };
 
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
+  for (let i = 0; i < cleanedLine.length; i++) {
+    const ch = cleanedLine[i];
     if (ch === '"') {
       inQuotes = !inQuotes;
     } else if (!inQuotes && ch in counts) {
       counts[ch]++;
     }
   }
+
+  // 3. Also check if '#' is used as a field wrapper/delimiter
+  //    e.g. #VALUE#,#VALUE# — the real delimiter is the comma between #-wrapped fields
+  const hashWrapped = /^#[^#]*#[,|;\t]/.test(cleanedLine.trim());
 
   // Pick the delimiter with the most occurrences
   let best = ",";
@@ -119,18 +196,34 @@ function detectDelimiter(line: string): string {
   }
 
   // If no delimiter found at all, fall back to whitespace splitting
-  if (bestCount === 0) return "WHITESPACE";
+  if (bestCount === 0) {
+    // Last resort: check if line has # separators (rare but possible)
+    if (hashWrapped) return ",";
+    return "WHITESPACE";
+  }
   return best;
 }
 
 /** Parse header line into cleaned, uppercased names */
 function parseHeaderLine(rawLine: string, delimiter: string): string[] {
-  if (delimiter === "WHITESPACE") {
-    return rawLine.trim().split(/\s{2,}|\t+/).map((h) => h.trim().toUpperCase());
+  let fields: string[];
+
+  if (delimiter === LMS_CARET_DELIM) {
+    fields = parseCaretLine(rawLine);
+  } else if (delimiter === "WHITESPACE") {
+    fields = rawLine.trim().split(/\s{2,}|\t+/).map((h) => h.trim());
+  } else {
+    fields = parseCSVLine(rawLine, delimiter);
   }
-  return parseCSVLine(rawLine, delimiter).map((h) =>
-    h.trim().toUpperCase().replace(/^["']+|["']+$/g, "")
-  );
+
+  return fields.map((h) => {
+    let cleaned = h.trim().toUpperCase();
+    // Remove surrounding quotes
+    cleaned = cleaned.replace(/^["']+|["']+$/g, "");
+    // Clean Oracle SQL artifacts (CHR(n), ||, #-wrappers, etc.)
+    cleaned = cleanOracleSQL(cleaned);
+    return cleaned;
+  });
 }
 
 /** Parse a CSV string into structured data */
@@ -218,7 +311,9 @@ export function parseCSV(text: string): ParsedCSV {
     if (/^\d+ rows? selected/i.test(line.trim())) break;
 
     let values: string[];
-    if (delimiter === "WHITESPACE") {
+    if (delimiter === LMS_CARET_DELIM) {
+      values = parseCaretLine(line);
+    } else if (delimiter === "WHITESPACE") {
       values = splitFixedWidth(rawHeaderLine, line);
     } else {
       values = parseCSVLine(line, delimiter);
@@ -229,7 +324,10 @@ export function parseCSV(text: string): ParsedCSV {
     const row: Record<string, string> = {};
     for (let j = 0; j < headers.length; j++) {
       if (headers[j]) {
-        row[headers[j]] = (values[j] ?? "").trim();
+        let val = (values[j] ?? "").trim();
+        // Strip '#' wrappers from values (CHR(35) artifact)
+        val = val.replace(/^#+|#+$/g, "");
+        row[headers[j]] = val;
       }
     }
     rows.push(row);
