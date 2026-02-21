@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { parseCSV, identifyFile, REQUIRED_FILES, OPTIONAL_FILES } from "@/lib/oracle-csv-parser";
 import { analyzeOracleEBS, type AnalysisResult, type LoadedTables } from "@/lib/oracle-analysis-engine";
 import { ORACLE_LICENSE_MAP } from "@/lib/oracle-license-map";
@@ -415,12 +415,45 @@ function SummaryCard({ label, value, sub, color }: { label: string; value: numbe
 }
 
 function TabSummary({ result }: { result: AnalysisResult }) {
+  const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
+
   // Group licenses by family
   const byFamily = new Map<string, typeof result.licenseSummary>();
   for (const ls of result.licenseSummary) {
     if (!byFamily.has(ls.family)) byFamily.set(ls.family, []);
     byFamily.get(ls.family)!.push(ls);
   }
+
+  // Build a lookup: productName -> combined users from all modules mapped to that product
+  const productUsersMap = new Map<string, typeof result.installedModules[0]["users"]>();
+  for (const mod of result.installedModules) {
+    if (!mod.licenseProduct || mod.licenseProduct.isBase) continue;
+    const key = mod.licenseProduct.productName;
+    if (!productUsersMap.has(key)) productUsersMap.set(key, []);
+    // Add users, dedup by userId
+    const existing = productUsersMap.get(key)!;
+    const existingIds = new Set(existing.map((u) => u.userId));
+    for (const u of mod.users) {
+      if (!existingIds.has(u.userId)) {
+        existing.push(u);
+        existingIds.add(u.userId);
+      }
+    }
+  }
+
+  const exportProductUsers = (productName: string) => {
+    const users = productUsersMap.get(productName) || [];
+    const headers = ["User Name", "User ID", "Active", "Last Logon Date", "User Type"];
+    const rows = users.map((u) => [
+      u.userName,
+      u.userId,
+      u.isActive ? "Yes" : "No",
+      u.lastLogonDate || "Never",
+      u.isSelfService ? "Self-Service" : "Application",
+    ]);
+    const safeName = productName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    downloadCSV(`${safeName}_users.csv`, headers, rows);
+  };
 
   return (
     <div className="space-y-6">
@@ -441,22 +474,108 @@ function TabSummary({ result }: { result: AnalysisResult }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {products.map((p) => (
-                  <tr key={p.productName} className="hover:bg-gray-50/50">
-                    <td className="py-2.5 pr-4 font-medium text-gray-900">{p.productName}</td>
-                    <td className="py-2.5 pr-4">
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                        p.metric === "Self-Service User"
-                          ? "bg-purple-100 text-purple-700"
-                          : "bg-blue-100 text-blue-700"
-                      }`}>
-                        {p.metric}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-4 text-right font-semibold">{p.activeUsers.toLocaleString()}</td>
-                    <td className="py-2.5 text-right text-gray-500">{p.totalUsers.toLocaleString()}</td>
-                  </tr>
-                ))}
+                {products.map((p) => {
+                  const isExpanded = expandedProduct === p.productName;
+                  const users = productUsersMap.get(p.productName) || [];
+                  return (
+                    <React.Fragment key={p.productName}>
+                      <tr
+                        onClick={() => setExpandedProduct(isExpanded ? null : p.productName)}
+                        className="hover:bg-gray-50/50 cursor-pointer"
+                      >
+                        <td className="py-2.5 pr-4 font-medium text-gray-900">
+                          <div className="flex items-center gap-2">
+                            <svg className={`h-3.5 w-3.5 text-gray-400 transition-transform flex-shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+                              fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                            </svg>
+                            {p.productName}
+                          </div>
+                        </td>
+                        <td className="py-2.5 pr-4">
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                            p.metric === "Self-Service User"
+                              ? "bg-purple-100 text-purple-700"
+                              : "bg-blue-100 text-blue-700"
+                          }`}>
+                            {p.metric}
+                          </span>
+                        </td>
+                        <td className="py-2.5 pr-4 text-right font-semibold">{p.activeUsers.toLocaleString()}</td>
+                        <td className="py-2.5 text-right text-gray-500">{p.totalUsers.toLocaleString()}</td>
+                      </tr>
+                      {isExpanded && (
+                        <tr>
+                          <td colSpan={4} className="p-0">
+                            <div className="bg-gray-50/70 border-y border-gray-100 px-6 py-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <p className="text-xs font-medium text-gray-600">
+                                  {users.length} users assigned to {p.productName}
+                                </p>
+                                {users.length > 0 && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); exportProductUsers(p.productName); }}
+                                    className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                                  >
+                                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                    </svg>
+                                    Export Excel
+                                  </button>
+                                )}
+                              </div>
+                              {users.length > 0 ? (
+                                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="border-b border-gray-200 bg-gray-100 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                                        <th className="px-3 py-2">User Name</th>
+                                        <th className="px-3 py-2">User ID</th>
+                                        <th className="px-3 py-2">Active</th>
+                                        <th className="px-3 py-2">Last Logon</th>
+                                        <th className="px-3 py-2">Type</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 bg-white">
+                                      {users.slice(0, 50).map((u, i) => (
+                                        <tr key={i} className="hover:bg-gray-50/50">
+                                          <td className="px-3 py-1.5 font-medium text-gray-900">{u.userName}</td>
+                                          <td className="px-3 py-1.5 text-gray-500 font-mono">{u.userId}</td>
+                                          <td className="px-3 py-1.5">
+                                            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                              u.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                                            }`}>
+                                              {u.isActive ? "Active" : "Inactive"}
+                                            </span>
+                                          </td>
+                                          <td className="px-3 py-1.5 text-gray-500">{u.lastLogonDate || "Never"}</td>
+                                          <td className="px-3 py-1.5">
+                                            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                              u.isSelfService ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+                                            }`}>
+                                              {u.isSelfService ? "Self-Service" : "Application"}
+                                            </span>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                  {users.length > 50 && (
+                                    <div className="px-3 py-2 text-xs text-gray-400 bg-gray-50 border-t border-gray-200">
+                                      Showing first 50 of {users.length} users. Export to Excel for the full list.
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-gray-400 italic">No users assigned.</p>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

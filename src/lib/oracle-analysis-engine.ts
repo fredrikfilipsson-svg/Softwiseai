@@ -123,13 +123,62 @@ export interface AnalysisResult {
 // Helpers
 // ────────────────────────────────────────────────────────────────
 
+const MONTH_MAP: Record<string, number> = {
+  JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+  JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+};
+
+/** Parse common Oracle date formats into a Date object */
+function parseOracleDate(dateStr: string): Date | null {
+  const s = dateStr.trim();
+  if (!s) return null;
+
+  // Try DD-MON-YYYY or DD-MON-YY (e.g. "20-FEB-2026", "20-FEB-26")
+  const ddMonYyyy = s.match(/^(\d{1,2})[-/]([A-Z]{3})[-/](\d{2,4})$/i);
+  if (ddMonYyyy) {
+    const day = parseInt(ddMonYyyy[1], 10);
+    const mon = MONTH_MAP[ddMonYyyy[2].toUpperCase()];
+    let year = parseInt(ddMonYyyy[3], 10);
+    if (mon !== undefined) {
+      if (year < 100) year += year < 50 ? 2000 : 1900;
+      return new Date(year, mon, day);
+    }
+  }
+
+  // Try DD-MON-YYYY HH:MI:SS (with time part)
+  const ddMonYyyyTime = s.match(/^(\d{1,2})[-/]([A-Z]{3})[-/](\d{2,4})\s+\d/i);
+  if (ddMonYyyyTime) {
+    const day = parseInt(ddMonYyyyTime[1], 10);
+    const mon = MONTH_MAP[ddMonYyyyTime[2].toUpperCase()];
+    let year = parseInt(ddMonYyyyTime[3], 10);
+    if (mon !== undefined) {
+      if (year < 100) year += year < 50 ? 2000 : 1900;
+      return new Date(year, mon, day);
+    }
+  }
+
+  // Try YYYY/MM/DD or YYYY-MM-DD (with optional time)
+  const yyyyMmDd = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (yyyyMmDd) {
+    return new Date(parseInt(yyyyMmDd[1], 10), parseInt(yyyyMmDd[2], 10) - 1, parseInt(yyyyMmDd[3], 10));
+  }
+
+  // Try MM/DD/YYYY (with optional time)
+  const mmDdYyyy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (mmDdYyyy) {
+    return new Date(parseInt(mmDdYyyy[3], 10), parseInt(mmDdYyyy[1], 10) - 1, parseInt(mmDdYyyy[2], 10));
+  }
+
+  // Fallback to native Date constructor
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function isDateActive(dateStr: string | undefined): boolean {
   if (!dateStr || dateStr.trim() === "") return true; // null end_date = active
-  try {
-    return new Date(dateStr) > new Date();
-  } catch {
-    return true;
-  }
+  const d = parseOracleDate(dateStr);
+  if (!d) return true; // unparseable = assume active
+  return d > new Date();
 }
 
 function findColumn(row: Record<string, string>, ...candidates: string[]): string {
@@ -207,12 +256,19 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
   // ── 2. Build user map ─────────────────────────────────────────
   const userMap = new Map<string, UserInfo>();
   if (tables.FND_USER) {
+    const fndUserHeaders = tables.FND_USER.headers;
+    console.log(`[Analysis] FND_USER headers: [${fndUserHeaders.join(", ")}]`);
+    let sampleCount = 0;
     for (const row of tables.FND_USER.rows) {
       const userId = findColumn(row, "USER_ID");
       const userName = findColumn(row, "USER_NAME");
       const startDate = findColumn(row, "START_DATE");
       const endDate = findColumn(row, "END_DATE");
       const lastLogon = findColumn(row, "LAST_LOGON_DATE");
+      if (sampleCount < 5) {
+        console.log(`[Analysis] FND_USER sample: userId="${userId}" userName="${userName}" endDate="${endDate}" lastLogon="${lastLogon}" isActive=${isDateActive(endDate)}`);
+        sampleCount++;
+      }
       if (userId) {
         userMap.set(userId, {
           userId,
@@ -224,6 +280,8 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
         });
       }
     }
+    const activeCount = Array.from(userMap.values()).filter(u => u.isActive).length;
+    console.log(`[Analysis] FND_USER: ${userMap.size} users, ${activeCount} active, ${userMap.size - activeCount} inactive`);
   }
 
   // ── 3. Build responsibility map ───────────────────────────────
