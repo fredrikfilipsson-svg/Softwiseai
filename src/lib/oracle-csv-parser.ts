@@ -119,12 +119,21 @@ function extractColumnsFromLMSSQL(sqlLine: string): string[] {
     // Skip pure separators/punctuation
     if (/^[;',\s]+$/.test(part)) continue;
 
-    // Handle SQL functions: TO_CHAR(COL, 'FMT'), NVL(COL, 'default'), etc.
-    const funcMatch = part.match(
-      /^(?:TO_CHAR|TO_NUMBER|TO_DATE|NVL|NVL2|DECODE|UPPER|LOWER|TRIM|SUBSTR|REPLACE|ROUND|TRUNC)\s*\(\s*([A-Z_][A-Z0-9_.]*)/i
-    );
-    if (funcMatch) {
-      part = funcMatch[1];
+    // Handle SQL functions, including nested calls:
+    // NVL(REPLACE(RESPONSIBILITY_NAME, CHR(10), ''), '') → RESPONSIBILITY_NAME
+    // TO_CHAR(CREATION_DATE, 'MM/DD/YYYY') → CREATION_DATE
+    const SQL_FUNC_PREFIX = /^(?:TO_CHAR|TO_NUMBER|TO_DATE|NVL|NVL2|DECODE|UPPER|LOWER|TRIM|SUBSTR|REPLACE|ROUND|TRUNC|RTRIM|LTRIM|LPAD|RPAD|CAST|COALESCE)\s*\(\s*/i;
+    if (SQL_FUNC_PREFIX.test(part)) {
+      // Strip function wrappers layer by layer
+      let stripped = part;
+      while (SQL_FUNC_PREFIX.test(stripped)) {
+        stripped = stripped.replace(SQL_FUNC_PREFIX, "");
+      }
+      // Extract the first valid column name from what remains
+      const colMatch = stripped.match(/^([A-Z_][A-Z0-9_.]*)/i);
+      if (colMatch) {
+        part = colMatch[1];
+      }
     }
 
     // Handle aliased expressions: COLUMN_NAME ALIAS or COLUMN_NAME "ALIAS"

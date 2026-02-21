@@ -357,7 +357,18 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
   const installedModules: InstalledModule[] = [];
   const unusedModules: InstalledModule[] = [];
 
+  // Diagnostic counters for step-by-step tracing
+  let diagTotalRows = 0;
+  let diagInstalledRows = 0;
+  let diagSkippedStatus = 0;
+  let diagSkippedNoApp = 0;
+  let diagHasLicense = 0;
+  let diagIsBase = 0;
+  const diagShortNames: string[] = [];
+  const diagSkippedStatuses: string[] = [];
+
   for (const row of tables.FND_PRODUCT_INSTALLATIONS.rows) {
+    diagTotalRows++;
     const appId = findColumn(row, "APPLICATION_ID", "APP_ID", "APPL_ID");
     const rawStatus = findColumn(row, "STATUS", "INSTALL_STATUS").toUpperCase().trim();
     const patchLevel = findColumn(row, "PATCH_LEVEL");
@@ -368,13 +379,29 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
       rawStatus === "INSTALLED" || rawStatus === "SHARED" ||
       rawStatus === "SHARED INSTALL" || rawStatus === "INSTALL" ||
       rawStatus.startsWith("I ") || rawStatus.startsWith("S ");
-    if (!isInstalled) continue;
+    if (!isInstalled) {
+      diagSkippedStatus++;
+      if (diagSkippedStatuses.length < 5 && !diagSkippedStatuses.includes(rawStatus)) {
+        diagSkippedStatuses.push(rawStatus);
+      }
+      continue;
+    }
     const status = (rawStatus === "S" || rawStatus === "SHARED" || rawStatus === "SHARED INSTALL") ? "S" : "I";
 
     const appInfo = appMap.get(appId);
-    if (!appInfo) continue;
+    if (!appInfo) {
+      diagSkippedNoApp++;
+      continue;
+    }
+
+    diagInstalledRows++;
 
     const licenseProduct = ORACLE_LICENSE_MAP[appInfo.shortName] || null;
+    if (licenseProduct) {
+      diagHasLicense++;
+      if (licenseProduct.isBase) diagIsBase++;
+    }
+    if (diagShortNames.length < 15) diagShortNames.push(appInfo.shortName);
 
     // Find responsibilities for this application
     const appResps: string[] = [];
@@ -438,6 +465,26 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
     installedModules.push(mod);
   }
 
+  // ── Step 7 diagnostics ──
+  warnings.push(
+    `[Diag] FND_PRODUCT_INSTALLATIONS pipeline: ${diagTotalRows} total rows → ` +
+    `${diagSkippedStatus} skipped (status not I/S${diagSkippedStatuses.length > 0 ? `, values: ${diagSkippedStatuses.map(s => `"${s}"`).join(",")}` : ""}) → ` +
+    `${diagSkippedNoApp} skipped (no appMap match) → ` +
+    `${diagInstalledRows} installed modules found`
+  );
+  warnings.push(
+    `[Diag] License mapping: ${diagHasLicense} have license product, ${diagIsBase} are base/technology, ` +
+    `${diagInstalledRows - diagHasLicense} have no mapping → ` +
+    `${installedModules.length} total in installedModules`
+  );
+  warnings.push(
+    `[Diag] First installed shortNames: [${diagShortNames.join(", ")}]`
+  );
+  warnings.push(
+    `[Diag] appMap has ${appMap.size} entries, respMap has ${respMap.size} entries, ` +
+    `userRespAssignments has ${userRespAssignments.size} entries, userMap has ${userMap.size} entries`
+  );
+
   // Sort: licensed products first, then by user count descending
   installedModules.sort((a, b) => {
     if (a.licenseProduct?.isBase && !b.licenseProduct?.isBase) return 1;
@@ -472,6 +519,13 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
   }
 
   const licenseSummary = Array.from(licenseSummaryMap.values()).sort((a, b) => b.activeUsers - a.activeUsers);
+
+  const installedNonBasePreview = installedModules.filter((m) => !m.licenseProduct?.isBase);
+  warnings.push(
+    `[Diag] License summary: ${licenseSummaryMap.size} unique products, ` +
+    `${installedNonBasePreview.length} non-base modules ` +
+    `(of ${installedModules.length} total installed)`
+  );
 
   // ── 9. User stats ─────────────────────────────────────────────
   const totalUsers = userMap.size;
