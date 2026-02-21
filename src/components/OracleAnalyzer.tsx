@@ -50,6 +50,7 @@ export default function OracleAnalyzer() {
 
       for (const file of Array.from(files)) {
         const tableName = identifyFile(file.name);
+        console.log(`[OracleAnalyzer] File: "${file.name}" → table: ${tableName ?? "UNRECOGNIZED"}`);
         const entry: LoadedFile = {
           name: file.name,
           tableName,
@@ -57,15 +58,21 @@ export default function OracleAnalyzer() {
           status: tableName ? "recognized" : "unknown",
         };
 
-        if (tableName && file.name.endsWith(".csv")) {
+        const lowerName = file.name.toLowerCase();
+        if (tableName && (lowerName.endsWith(".csv") || lowerName.endsWith(".txt") || lowerName.endsWith(".dat"))) {
           try {
             const text = await file.text();
+            console.log(`[OracleAnalyzer] Parsing "${file.name}" (${text.length} chars, first 200: "${text.substring(0, 200).replace(/\n/g, "\\n")}")`);
             const parsed = parseCSV(text);
+            console.log(`[OracleAnalyzer] Parsed "${file.name}" → ${parsed.rows.length} rows, ${parsed.headers.length} cols, headers: [${parsed.headers.slice(0, 5).join(", ")}], delim="${parsed.detectedDelimiter}", skipped=${parsed.skippedLines}`);
             newTables[tableName] = parsed;
             entry.status = "recognized";
-          } catch {
+          } catch (err) {
+            console.error(`[OracleAnalyzer] Error parsing "${file.name}":`, err);
             entry.status = "error";
           }
+        } else if (!tableName) {
+          console.warn(`[OracleAnalyzer] File "${file.name}" not recognized as any known Oracle table`);
         }
 
         // Avoid duplicates
@@ -106,9 +113,14 @@ export default function OracleAnalyzer() {
 
   const runAnalysis = useCallback(() => {
     setAnalyzing(true);
+    console.log(`[OracleAnalyzer v3] Running analysis with ${Object.keys(tables).length} tables: [${Object.keys(tables).join(", ")}]`);
+    for (const [name, csv] of Object.entries(tables)) {
+      console.log(`[OracleAnalyzer v3] Table "${name}": ${csv.rows.length} rows, headers=[${csv.headers.slice(0, 5).join(", ")}]`);
+    }
     // Use setTimeout to let the UI update with the loading state
     setTimeout(() => {
       const analysisResult = analyzeOracleEBS(tables);
+      console.log(`[OracleAnalyzer v3] Analysis complete: ${analysisResult.applications.length} apps, ${analysisResult.installedModules.length} modules, ${analysisResult.licenseSummary.length} licenses, ${analysisResult.warnings.length} warnings`);
       setResult(analysisResult);
       setActiveTab("summary");
       setAnalyzing(false);
@@ -132,7 +144,7 @@ export default function OracleAnalyzer() {
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Oracle EBS License Analyzer</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Oracle EBS License Analyzer <span className="text-xs font-normal text-gray-400">v3</span></h1>
         <p className="mt-2 text-gray-600">
           Drop your Oracle LMS collection CSV files to analyze which E-Business Suite licenses are required.
         </p>
@@ -162,7 +174,7 @@ export default function OracleAnalyzer() {
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".csv,.txt"
+              accept=".csv,.txt,.dat,.CSV,.TXT,.DAT"
               onChange={handleFileSelect}
               className="hidden"
             />
