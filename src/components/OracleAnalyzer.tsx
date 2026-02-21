@@ -53,6 +53,131 @@ function downloadCSV(filename: string, headers: string[], rows: string[][]) {
   URL.revokeObjectURL(url);
 }
 
+/** Generate a printable PDF report in a new window */
+function generatePDFReport(result: AnalysisResult) {
+  const win = window.open("", "_blank");
+  if (!win) return;
+
+  const licensedProducts = result.licenseSummary.filter((ls) => ls.activeUsers > 0);
+  const allProducts = result.licenseSummary;
+
+  const productRows = allProducts.map((ls) =>
+    `<tr${ls.activeUsers === 0 ? ' style="color:#999"' : ""}>
+      <td style="padding:6px 12px;border-bottom:1px solid #eee;font-weight:500">${ls.productName}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #eee">${ls.family}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #eee">${ls.metric}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${ls.applicationUsers.toLocaleString()}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${ls.selfServiceUsers.toLocaleString()}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:bold">${ls.activeUsers.toLocaleString()}</td>
+    </tr>`
+  ).join("");
+
+  const moduleRows = result.installedModules
+    .filter((m) => !m.licenseProduct?.isBase && m.activeUsers > 0)
+    .map((m) =>
+      `<tr>
+        <td style="padding:6px 12px;border-bottom:1px solid #eee;font-weight:500">${m.displayName}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid #eee">${m.licenseProduct?.productName || "—"}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${m.activeUsers.toLocaleString()}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${m.applicationUsers.toLocaleString()}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${m.selfServiceUsers.toLocaleString()}</td>
+      </tr>`
+    ).join("");
+
+  const warningItems = result.warnings.map((w) => `<li style="margin-bottom:4px">${w}</li>`).join("");
+
+  win.document.write(`<!DOCTYPE html>
+<html><head><title>Oracle EBS License Analysis Report</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; color: #1a1a1a; font-size: 12px; }
+  h1 { font-size: 22px; color: #1e40af; margin-bottom: 4px; }
+  h2 { font-size: 16px; color: #374151; margin-top: 32px; margin-bottom: 12px; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; }
+  .subtitle { color: #6b7280; font-size: 12px; margin-bottom: 24px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .summary-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; }
+  .summary-card .value { font-size: 28px; font-weight: bold; }
+  .summary-card .label { font-size: 11px; color: #6b7280; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  th { padding: 8px 12px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; border-bottom: 2px solid #e5e7eb; }
+  .text-right { text-align: right; }
+  .warnings { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; }
+  .warnings li { font-size: 12px; color: #92400e; }
+  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 10px; text-align: center; }
+  @media print { body { margin: 20px; } }
+</style>
+</head><body>
+<h1>Oracle EBS License Analysis Report</h1>
+<p class="subtitle">Generated: ${new Date().toLocaleString()} | Files analyzed: ${result.loadedFiles.length} | Modules installed: ${result.counts.installedModules}</p>
+
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="value" style="color:#1e40af">${result.counts.licensedProducts}</div>
+    <div class="label">Licensed Products</div>
+  </div>
+  <div class="summary-card">
+    <div class="value" style="color:#2563eb">${result.counts.installedModules}</div>
+    <div class="label">Installed Modules</div>
+  </div>
+  <div class="summary-card">
+    <div class="value" style="color:#16a34a">${result.counts.totalAppUsers.toLocaleString()}</div>
+    <div class="label">Application Users</div>
+  </div>
+  <div class="summary-card">
+    <div class="value" style="color:#7c3aed">${result.counts.totalSelfServiceUsers.toLocaleString()}</div>
+    <div class="label">Self-Service Users</div>
+  </div>
+</div>
+
+<h2>License Requirements (${licensedProducts.length} active of ${allProducts.length} total)</h2>
+<table>
+  <thead><tr>
+    <th>License Product</th><th>Family</th><th>Metric</th>
+    <th class="text-right">App Users</th><th class="text-right">SS Users</th><th class="text-right">Total Active</th>
+  </tr></thead>
+  <tbody>${productRows}</tbody>
+</table>
+
+<h2>Installed Modules with Active Users</h2>
+<table>
+  <thead><tr>
+    <th>Module</th><th>License Product</th>
+    <th class="text-right">Active Users</th><th class="text-right">App Users</th><th class="text-right">SS Users</th>
+  </tr></thead>
+  <tbody>${moduleRows}</tbody>
+</table>
+
+<h2>User Statistics</h2>
+<table>
+  <tbody>
+    <tr><td style="padding:6px 12px;border-bottom:1px solid #eee">Total Users (FND_USER)</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:bold">${result.userStats.totalUsers.toLocaleString()}</td></tr>
+    <tr><td style="padding:6px 12px;border-bottom:1px solid #eee">Active Users</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;color:#16a34a">${result.userStats.activeUsers.toLocaleString()}</td></tr>
+    <tr><td style="padding:6px 12px;border-bottom:1px solid #eee">Inactive / End-Dated</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${result.userStats.inactiveUsers.toLocaleString()}</td></tr>
+    <tr><td style="padding:6px 12px;border-bottom:1px solid #eee">Users with Responsibilities</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${result.userStats.usersWithResponsibilities.toLocaleString()}</td></tr>
+    <tr><td style="padding:6px 12px;border-bottom:1px solid #eee">Users with Login History</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${result.userStats.usersWithLogins.toLocaleString()}</td></tr>
+  </tbody>
+</table>
+
+${result.warnings.length > 0 ? `
+<h2>Findings & Warnings</h2>
+<div class="warnings"><ul style="margin:0;padding-left:20px">${warningItems}</ul></div>
+` : ""}
+
+${result.unusedModules.length > 0 ? `
+<h2>Optimization Opportunities</h2>
+<p style="color:#92400e;font-size:12px">${result.unusedModules.length} module(s) are installed but have no assigned users:</p>
+<p style="font-size:12px">${result.unusedModules.map((m) => m.licenseProduct?.productName || m.displayName).join(", ")}</p>
+` : ""}
+
+<div class="footer">
+  Oracle EBS License Analysis Report — Generated by SoftwiseAI Oracle Analyzer<br>
+  All data processed locally in browser. No data was uploaded or transmitted.
+</div>
+</body></html>`);
+  win.document.close();
+  // Auto-trigger print dialog after a short delay
+  setTimeout(() => win.print(), 500);
+}
+
 /** Check if a login date string is on or after a given cutoff date string (YYYY-MM-DD) */
 function isLoginAfter(loginDateStr: string, cutoff: string): boolean {
   if (!loginDateStr || !cutoff) return true;
@@ -316,16 +441,27 @@ export default function OracleAnalyzer() {
       {/* Results Dashboard */}
       {result && (
         <div className="animate-fade-in">
-          {/* Back button */}
-          <button
-            onClick={() => setResult(null)}
-            className="mb-6 flex items-center gap-1 text-sm text-brand-500 hover:text-brand-700 transition-colors"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-            </svg>
-            Load different files
-          </button>
+          {/* Action bar */}
+          <div className="mb-6 flex items-center justify-between">
+            <button
+              onClick={() => setResult(null)}
+              className="flex items-center gap-1 text-sm text-brand-500 hover:text-brand-700 transition-colors"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+              </svg>
+              Load different files
+            </button>
+            <button
+              onClick={() => generatePDFReport(result)}
+              className="flex items-center gap-1.5 rounded-lg border border-brand-300 bg-brand-50 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+              </svg>
+              Generate PDF Report
+            </button>
+          </div>
 
           {/* Summary Cards */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
@@ -660,43 +796,202 @@ function TabSummary({ result }: { result: AnalysisResult }) {
 }
 
 function TabLicenses({ result }: { result: AnalysisResult }) {
+  const [hideZero, setHideZero] = useState(false);
+  const [expandedLicense, setExpandedLicense] = useState<string | null>(null);
+  const [activeOnly, setActiveOnly] = useState(false);
+  const [loginAfter, setLoginAfter] = useState("");
+
+  const displayed = hideZero ? result.licenseSummary.filter((ls) => ls.activeUsers > 0) : result.licenseSummary;
+
+  // Build user lookup per product (same as TabSummary)
+  const productUsersMap = new Map<string, typeof result.installedModules[0]["users"]>();
+  for (const mod of result.installedModules) {
+    if (!mod.licenseProduct || mod.licenseProduct.isBase) continue;
+    const key = mod.licenseProduct.productName;
+    if (!productUsersMap.has(key)) productUsersMap.set(key, []);
+    const existing = productUsersMap.get(key)!;
+    const existingIds = new Set(existing.map((u) => u.userId));
+    for (const u of mod.users) {
+      if (!existingIds.has(u.userId)) {
+        existing.push(u);
+        existingIds.add(u.userId);
+      }
+    }
+  }
+
+  const exportProductUsers = (productName: string) => {
+    const allUsers = productUsersMap.get(productName) || [];
+    const users = allUsers.filter((u) => {
+      if (activeOnly && !u.isActive) return false;
+      if (loginAfter && !isLoginAfter(u.lastLogonDate, loginAfter)) return false;
+      return true;
+    });
+    const headers = ["User Name", "User ID", "Active", "Last Logon Date", "User Type"];
+    const rows = users.map((u) => [
+      u.userName, u.userId, u.isActive ? "Yes" : "No", u.lastLogonDate || "Never", u.isSelfService ? "Self-Service" : "Application",
+    ]);
+    const safeName = productName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    downloadCSV(`${safeName}_users.csv`, headers, rows);
+  };
+
   return (
-    <div className="card overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wider text-gray-400">
-            <th className="pb-3 pr-4">License Product</th>
-            <th className="pb-3 pr-4">Family</th>
-            <th className="pb-3 pr-4">Metric</th>
-            <th className="pb-3 pr-4 text-right">App Users</th>
-            <th className="pb-3 pr-4 text-right">SS Users</th>
-            <th className="pb-3 text-right">Total Active</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {result.licenseSummary.map((ls) => (
-            <tr key={ls.productName} className="hover:bg-gray-50/50">
-              <td className="py-3 pr-4 font-medium text-gray-900">{ls.productName}</td>
-              <td className="py-3 pr-4 text-gray-600">{ls.family}</td>
-              <td className="py-3 pr-4">
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                  ls.metric === "Self-Service User"
-                    ? "bg-purple-100 text-purple-700"
-                    : "bg-blue-100 text-blue-700"
-                }`}>
-                  {ls.metric}
-                </span>
-              </td>
-              <td className="py-3 pr-4 text-right">{ls.applicationUsers.toLocaleString()}</td>
-              <td className="py-3 pr-4 text-right">{ls.selfServiceUsers.toLocaleString()}</td>
-              <td className="py-3 text-right font-semibold">{ls.activeUsers.toLocaleString()}</td>
+    <div className="space-y-4">
+      {/* Filter bar */}
+      <div className="flex items-center justify-between">
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={hideZero}
+            onChange={(e) => setHideZero(e.target.checked)}
+            className="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+          />
+          Hide products with 0 users
+        </label>
+        <span className="text-xs text-gray-400">
+          {displayed.length} of {result.licenseSummary.length} products
+        </span>
+      </div>
+
+      <div className="card overflow-x-auto !p-0">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-400">
+              <th className="px-4 py-3 pr-4">License Product</th>
+              <th className="px-4 py-3 pr-4">Family</th>
+              <th className="px-4 py-3 pr-4">Metric</th>
+              <th className="px-4 py-3 pr-4 text-right">App Users</th>
+              <th className="px-4 py-3 pr-4 text-right">SS Users</th>
+              <th className="px-4 py-3 text-right">Total Active</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      {result.licenseSummary.length === 0 && (
-        <p className="text-center text-gray-400 py-8">No licensed products detected. Check that FND_PRODUCT_INSTALLATIONS was loaded correctly.</p>
-      )}
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {displayed.map((ls) => {
+              const isExpanded = expandedLicense === ls.productName;
+              const allUsers = productUsersMap.get(ls.productName) || [];
+              const filteredUsers = allUsers.filter((u) => {
+                if (activeOnly && !u.isActive) return false;
+                if (loginAfter && !isLoginAfter(u.lastLogonDate, loginAfter)) return false;
+                return true;
+              });
+              return (
+                <React.Fragment key={ls.productName}>
+                  <tr
+                    onClick={() => setExpandedLicense(isExpanded ? null : ls.productName)}
+                    className="hover:bg-gray-50/50 cursor-pointer"
+                  >
+                    <td className="px-4 py-3 pr-4 font-medium text-gray-900">
+                      <div className="flex items-center gap-2">
+                        <svg className={`h-3.5 w-3.5 text-gray-400 transition-transform flex-shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+                          fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                        </svg>
+                        {ls.productName}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 pr-4 text-gray-600">{ls.family}</td>
+                    <td className="px-4 py-3 pr-4">
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                        ls.metric === "Self-Service User"
+                          ? "bg-purple-100 text-purple-700"
+                          : "bg-blue-100 text-blue-700"
+                      }`}>
+                        {ls.metric}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 pr-4 text-right">{ls.applicationUsers.toLocaleString()}</td>
+                    <td className="px-4 py-3 pr-4 text-right">{ls.selfServiceUsers.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{ls.activeUsers.toLocaleString()}</td>
+                  </tr>
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={6} className="p-0">
+                        <div className="bg-gray-50/70 border-y border-gray-100 px-6 py-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                            <div className="flex flex-wrap items-center gap-4">
+                              <p className="text-xs font-medium text-gray-600">
+                                {filteredUsers.length} users{(activeOnly || loginAfter) ? " (filtered)" : ""}
+                                {filteredUsers.length !== allUsers.length && (
+                                  <span className="text-gray-400 ml-1">({allUsers.length} total)</span>
+                                )}
+                              </p>
+                              <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                                <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)}
+                                  className="rounded border-gray-300 text-brand-500 focus:ring-brand-500 h-3.5 w-3.5" />
+                                Active only
+                              </label>
+                              <div className="flex items-center gap-1.5 text-xs text-gray-600" onClick={(e) => e.stopPropagation()}>
+                                <span>Login after:</span>
+                                <input type="date" value={loginAfter} onChange={(e) => setLoginAfter(e.target.value)}
+                                  className="rounded border border-gray-300 px-2 py-0.5 text-xs focus:border-brand-500 focus:ring-brand-500" />
+                                {loginAfter && <button onClick={() => setLoginAfter("")} className="text-gray-400 hover:text-red-500 text-xs">clear</button>}
+                              </div>
+                            </div>
+                            {filteredUsers.length > 0 && (
+                              <button onClick={(e) => { e.stopPropagation(); exportProductUsers(ls.productName); }}
+                                className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                </svg>
+                                Export Excel
+                              </button>
+                            )}
+                          </div>
+                          {filteredUsers.length > 0 ? (
+                            <div className="overflow-x-auto rounded-lg border border-gray-200">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="border-b border-gray-200 bg-gray-100 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                                    <th className="px-3 py-2">User Name</th>
+                                    <th className="px-3 py-2">User ID</th>
+                                    <th className="px-3 py-2">Active</th>
+                                    <th className="px-3 py-2">Last Logon</th>
+                                    <th className="px-3 py-2">Type</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 bg-white">
+                                  {filteredUsers.slice(0, 100).map((u, i) => (
+                                    <tr key={i} className="hover:bg-gray-50/50">
+                                      <td className="px-3 py-1.5 font-medium text-gray-900">{u.userName}</td>
+                                      <td className="px-3 py-1.5 text-gray-500 font-mono">{u.userId}</td>
+                                      <td className="px-3 py-1.5">
+                                        <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                          u.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                                        }`}>{u.isActive ? "Active" : "Inactive"}</span>
+                                      </td>
+                                      <td className="px-3 py-1.5 text-gray-500">{u.lastLogonDate || "Never"}</td>
+                                      <td className="px-3 py-1.5">
+                                        <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                          u.isSelfService ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+                                        }`}>{u.isSelfService ? "Self-Service" : "Application"}</span>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              {filteredUsers.length > 100 && (
+                                <div className="px-3 py-2 text-xs text-gray-400 bg-gray-50 border-t border-gray-200">
+                                  Showing first 100 of {filteredUsers.length} users. Export to Excel for the full list.
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-400 italic">{activeOnly || loginAfter ? "No users match the current filters." : "No users assigned."}</p>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+        {displayed.length === 0 && (
+          <p className="text-center text-gray-400 py-8">
+            {hideZero ? "All products have 0 active users. Uncheck the filter to see them." : "No licensed products detected."}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
