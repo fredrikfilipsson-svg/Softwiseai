@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useRef } from "react";
 import { parseCSV, identifyFile, REQUIRED_FILES, OPTIONAL_FILES } from "@/lib/oracle-csv-parser";
 import { analyzeOracleEBS, type AnalysisResult, type LoadedTables } from "@/lib/oracle-analysis-engine";
-import { ORACLE_LICENSE_MAP } from "@/lib/oracle-license-map";
+import { ORACLE_LICENSE_MAP, ORACLE_LIST_PRICES, ORACLE_ANNUAL_SUPPORT_PCT } from "@/lib/oracle-license-map";
 
 interface LoadedFile {
   name: string;
@@ -30,7 +30,7 @@ export interface ComplianceRow {
   status: "compliant" | "under-licensed" | "over-licensed" | "not-deployed" | "not-owned";
 }
 
-type Tab = "summary" | "licenses" | "modules" | "users" | "responsibilities" | "resp-mapping" | "warnings" | "compliance";
+type Tab = "summary" | "licenses" | "modules" | "users" | "responsibilities" | "resp-mapping" | "warnings" | "compliance" | "cost";
 
 /** Generate a CSV string from headers and rows, then trigger a browser download */
 function downloadCSV(filename: string, headers: string[], rows: string[][]) {
@@ -60,6 +60,55 @@ function generatePDFReport(result: AnalysisResult) {
 
   const licensedProducts = result.licenseSummary.filter((ls) => ls.activeUsers > 0);
   const allProducts = result.licenseSummary;
+
+  // Build cost section HTML
+  const costData = allProducts
+    .filter((ls) => ls.activeUsers > 0)
+    .map((ls) => {
+      const price = ORACLE_LIST_PRICES[ls.productName] ?? 0;
+      const licenseCost = ls.activeUsers * price;
+      const support = licenseCost * ORACLE_ANNUAL_SUPPORT_PCT;
+      return { productName: ls.productName, family: ls.family, activeUsers: ls.activeUsers, price, licenseCost, support };
+    })
+    .filter((r) => r.licenseCost > 0)
+    .sort((a, b) => b.licenseCost - a.licenseCost);
+  const totalLicCost = costData.reduce((s, r) => s + r.licenseCost, 0);
+  const totalSupCost = costData.reduce((s, r) => s + r.support, 0);
+  const fmtUSD = (n: number) => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+  let costSectionHtml = "";
+  if (costData.length > 0) {
+    const costRowsHtml = costData.map((r) =>
+      '<tr>' +
+      '<td style="padding:6px 12px;border-bottom:1px solid #eee;font-weight:500">' + r.productName + '</td>' +
+      '<td style="padding:6px 12px;border-bottom:1px solid #eee">' + r.family + '</td>' +
+      '<td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">' + r.activeUsers.toLocaleString() + '</td>' +
+      '<td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">' + fmtUSD(r.price) + '</td>' +
+      '<td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;color:#1e40af">' + fmtUSD(r.licenseCost) + '</td>' +
+      '<td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:#92400e">' + fmtUSD(r.support) + '</td>' +
+      '</tr>'
+    ).join("");
+
+    costSectionHtml =
+      '<h2>Estimated License Costs (List Price)</h2>' +
+      '<div class="summary-grid">' +
+      '<div class="summary-card"><div class="value" style="color:#1e40af">' + fmtUSD(totalLicCost) + '</div><div class="label">License Cost</div></div>' +
+      '<div class="summary-card"><div class="value" style="color:#92400e">' + fmtUSD(totalSupCost) + '</div><div class="label">Annual Support (22%)</div></div>' +
+      '<div class="summary-card"><div class="value" style="color:#16a34a">' + fmtUSD(totalLicCost + totalSupCost) + '</div><div class="label">Year 1 Total</div></div>' +
+      '<div class="summary-card"><div class="value" style="color:#7c3aed">' + fmtUSD(totalLicCost + totalSupCost * 5) + '</div><div class="label">5-Year TCO</div></div>' +
+      '</div>' +
+      '<table><thead><tr>' +
+      '<th>License Product</th><th>Family</th>' +
+      '<th class="text-right">Users</th><th class="text-right">List Price</th>' +
+      '<th class="text-right">License Cost</th><th class="text-right">Annual Support</th>' +
+      '</tr></thead><tbody>' + costRowsHtml + '</tbody>' +
+      '<tfoot><tr style="border-top:2px solid #374151;font-weight:bold">' +
+      '<td colspan="4" style="padding:8px 12px">Total</td>' +
+      '<td style="padding:8px 12px;text-align:right;color:#1e40af">' + fmtUSD(totalLicCost) + '</td>' +
+      '<td style="padding:8px 12px;text-align:right;color:#92400e">' + fmtUSD(totalSupCost) + '</td>' +
+      '</tr></tfoot></table>' +
+      '<p style="font-size:10px;color:#6b7280;margin-top:8px">* List prices from Oracle EBS Global Price List. Actual prices vary with negotiated discounts (30-60% typical). Annual support = 22% of net license fee.</p>';
+  }
 
   const productRows = allProducts.map((ls) =>
     `<tr${ls.activeUsers === 0 ? ' style="color:#999"' : ""}>
@@ -167,6 +216,8 @@ ${result.unusedModules.length > 0 ? `
 <p style="color:#92400e;font-size:12px">${result.unusedModules.length} module(s) are installed but have no assigned users:</p>
 <p style="font-size:12px">${result.unusedModules.map((m) => m.licenseProduct?.productName || m.displayName).join(", ")}</p>
 ` : ""}
+
+${costSectionHtml}
 
 <div class="footer">
   Oracle EBS License Analysis Report — Generated by SoftwiseAI Oracle Analyzer<br>
@@ -502,6 +553,7 @@ export default function OracleAnalyzer() {
                 { key: "responsibilities", label: "User Responsibilities" },
                 { key: "resp-mapping", label: "Resp → License" },
                 { key: "users", label: "User Statistics" },
+                { key: "cost", label: "Cost Estimate" },
                 { key: "warnings", label: `Findings (${result.warnings.length})` },
               ] as { key: Tab; label: string }[]).map((tab) => (
                 <button
@@ -539,6 +591,7 @@ export default function OracleAnalyzer() {
           {activeTab === "responsibilities" && <TabUserResponsibilities result={result} />}
           {activeTab === "resp-mapping" && <TabRespMapping result={result} />}
           {activeTab === "users" && <TabUsers result={result} />}
+          {activeTab === "cost" && <TabCostEstimate result={result} />}
           {activeTab === "warnings" && <TabWarnings result={result} />}
         </div>
       )}
@@ -796,7 +849,7 @@ function TabSummary({ result }: { result: AnalysisResult }) {
 }
 
 function TabLicenses({ result }: { result: AnalysisResult }) {
-  const [hideZero, setHideZero] = useState(false);
+  const [hideZero, setHideZero] = useState(true);
   const [expandedLicense, setExpandedLicense] = useState<string | null>(null);
   const [activeOnly, setActiveOnly] = useState(false);
   const [loginAfter, setLoginAfter] = useState("");
@@ -2034,6 +2087,263 @@ function TabCompliance({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Cost Estimate Dashboard ─────────────────────────────────────
+
+interface CostLine {
+  productName: string;
+  family: string;
+  metric: string;
+  activeUsers: number;
+  listPrice: number;
+  licenseCost: number;
+  annualSupport: number;
+  hasPricing: boolean;
+}
+
+function TabCostEstimate({ result }: { result: AnalysisResult }) {
+  const [hideZeroCost, setHideZeroCost] = useState(false);
+  const [discountPct, setDiscountPct] = useState(0);
+
+  // Build cost lines for each licensed product
+  const costLines: CostLine[] = result.licenseSummary
+    .filter((ls) => !ORACLE_LICENSE_MAP[ls.modules[0]]?.isBase)
+    .map((ls) => {
+      const price = ORACLE_LIST_PRICES[ls.productName] ?? 0;
+      const users = ls.activeUsers;
+      const discountMultiplier = 1 - discountPct / 100;
+      const licenseCost = users * price * discountMultiplier;
+      const annualSupport = licenseCost * ORACLE_ANNUAL_SUPPORT_PCT;
+      return {
+        productName: ls.productName,
+        family: ls.family,
+        metric: ls.metric,
+        activeUsers: users,
+        listPrice: price,
+        licenseCost,
+        annualSupport,
+        hasPricing: price > 0,
+      };
+    })
+    .sort((a, b) => b.licenseCost - a.licenseCost);
+
+  const displayed = hideZeroCost ? costLines.filter((cl) => cl.licenseCost > 0) : costLines;
+
+  const totalLicenseCost = costLines.reduce((s, cl) => s + cl.licenseCost, 0);
+  const totalAnnualSupport = costLines.reduce((s, cl) => s + cl.annualSupport, 0);
+  const totalYear1 = totalLicenseCost + totalAnnualSupport;
+  const total5Year = totalLicenseCost + totalAnnualSupport * 5;
+  const productsWithPricing = costLines.filter((cl) => cl.hasPricing && cl.activeUsers > 0).length;
+  const productsWithoutPricing = costLines.filter((cl) => !cl.hasPricing && cl.activeUsers > 0).length;
+
+  // Group by family for the chart
+  const familyCosts = new Map<string, number>();
+  for (const cl of costLines) {
+    familyCosts.set(cl.family, (familyCosts.get(cl.family) || 0) + cl.licenseCost);
+  }
+  const familyEntries = Array.from(familyCosts.entries())
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const maxFamilyCost = familyEntries.length > 0 ? familyEntries[0][1] : 1;
+
+  const familyColors: Record<string, string> = {
+    Financials: "bg-blue-500",
+    Procurement: "bg-green-500",
+    "Supply Chain": "bg-amber-500",
+    HRMS: "bg-purple-500",
+    CRM: "bg-pink-500",
+    Projects: "bg-indigo-500",
+    "Business Intelligence": "bg-cyan-500",
+    "Order Management": "bg-orange-500",
+    "Public Sector": "bg-teal-500",
+    Industry: "bg-red-500",
+  };
+
+  const exportCostEstimate = () => {
+    const headers = [
+      "License Product", "Family", "Metric", "Active Users",
+      "List Price (USD)", "Discount %", "License Cost (USD)", "Annual Support (USD)",
+    ];
+    const rows = costLines.filter((cl) => cl.activeUsers > 0).map((cl) => [
+      cl.productName, cl.family, cl.metric, String(cl.activeUsers),
+      cl.listPrice > 0 ? cl.listPrice.toFixed(0) : "N/A",
+      String(discountPct),
+      cl.licenseCost.toFixed(0),
+      cl.annualSupport.toFixed(0),
+    ]);
+    rows.push(["", "", "", "", "", "", "", ""]);
+    rows.push(["TOTAL LICENSE COST", "", "", "", "", "", totalLicenseCost.toFixed(0), ""]);
+    rows.push(["TOTAL ANNUAL SUPPORT (22%)", "", "", "", "", "", "", totalAnnualSupport.toFixed(0)]);
+    rows.push(["TOTAL YEAR 1 COST", "", "", "", "", "", totalYear1.toFixed(0), ""]);
+    rows.push(["TOTAL 5-YEAR TCO", "", "", "", "", "", total5Year.toFixed(0), ""]);
+    downloadCSV(`oracle_cost_estimate_${discountPct}pct_discount.csv`, headers, rows);
+  };
+
+  const fmt = (n: number) => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+  return (
+    <div className="space-y-6">
+      {/* Summary Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl border p-5 bg-blue-50 text-blue-700 border-blue-200">
+          <p className="text-xs font-medium opacity-80">Total License Cost</p>
+          <p className="mt-1 text-2xl font-bold">{fmt(totalLicenseCost)}</p>
+          <p className="mt-1 text-xs opacity-60">{discountPct > 0 ? `${discountPct}% discount applied` : "list price (no discount)"}</p>
+        </div>
+        <div className="rounded-xl border p-5 bg-amber-50 text-amber-700 border-amber-200">
+          <p className="text-xs font-medium opacity-80">Annual Support (22%)</p>
+          <p className="mt-1 text-2xl font-bold">{fmt(totalAnnualSupport)}</p>
+          <p className="mt-1 text-xs opacity-60">recurring yearly</p>
+        </div>
+        <div className="rounded-xl border p-5 bg-green-50 text-green-700 border-green-200">
+          <p className="text-xs font-medium opacity-80">Year 1 Total</p>
+          <p className="mt-1 text-2xl font-bold">{fmt(totalYear1)}</p>
+          <p className="mt-1 text-xs opacity-60">license + first year support</p>
+        </div>
+        <div className="rounded-xl border p-5 bg-purple-50 text-purple-700 border-purple-200">
+          <p className="text-xs font-medium opacity-80">5-Year TCO</p>
+          <p className="mt-1 text-2xl font-bold">{fmt(total5Year)}</p>
+          <p className="mt-1 text-xs opacity-60">license + 5 years support</p>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="card">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-6">
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-medium text-gray-700">Discount:</label>
+              <input
+                type="range"
+                min="0" max="70" step="5"
+                value={discountPct}
+                onChange={(e) => setDiscountPct(Number(e.target.value))}
+                className="w-32 accent-brand-500"
+              />
+              <span className="text-sm font-bold text-brand-600 w-12">{discountPct}%</span>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hideZeroCost}
+                onChange={(e) => setHideZeroCost(e.target.checked)}
+                className="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+              />
+              Hide zero-cost products
+            </label>
+          </div>
+          <button
+            onClick={exportCostEstimate}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            Export Cost Estimate
+          </button>
+        </div>
+      </div>
+
+      {/* Cost by Family Bar Chart */}
+      {familyEntries.length > 0 && (
+        <div className="card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">License Cost by Family</h3>
+          <div className="space-y-3">
+            {familyEntries.map(([family, cost]) => (
+              <div key={family} className="flex items-center gap-3">
+                <span className="text-sm text-gray-700 w-40 truncate">{family}</span>
+                <div className="flex-1 h-7 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${familyColors[family] || "bg-gray-500"} transition-all`}
+                    style={{ width: `${Math.max((cost / maxFamilyCost) * 100, 2)}%` }}
+                  />
+                </div>
+                <span className="text-sm font-semibold text-gray-900 w-32 text-right">{fmt(cost)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Detailed Cost Table */}
+      <div className="card overflow-x-auto !p-0">
+        <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-700">
+            Detailed Cost Breakdown ({displayed.filter((cl) => cl.activeUsers > 0).length} products with active users)
+          </h3>
+          {productsWithoutPricing > 0 && (
+            <span className="text-xs text-amber-600">
+              {productsWithoutPricing} product(s) without list price data
+            </span>
+          )}
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50/50 text-left text-xs font-medium uppercase tracking-wider text-gray-400">
+              <th className="px-4 py-3">Product</th>
+              <th className="px-4 py-3">Family</th>
+              <th className="px-4 py-3">Metric</th>
+              <th className="px-4 py-3 text-right">Active Users</th>
+              <th className="px-4 py-3 text-right">List Price</th>
+              <th className="px-4 py-3 text-right">License Cost</th>
+              <th className="px-4 py-3 text-right">Annual Support</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {displayed.map((cl) => (
+              <tr key={cl.productName} className={`hover:bg-gray-50/50 ${cl.activeUsers === 0 ? "opacity-40" : ""}`}>
+                <td className="px-4 py-3 font-medium text-gray-900">{cl.productName}</td>
+                <td className="px-4 py-3 text-gray-600">{cl.family}</td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                    cl.metric === "Self-Service User" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+                  }`}>
+                    {cl.metric}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-right font-semibold">{cl.activeUsers.toLocaleString()}</td>
+                <td className="px-4 py-3 text-right">
+                  {cl.hasPricing ? (
+                    <span className="text-gray-700">{fmt(cl.listPrice)}</span>
+                  ) : (
+                    <span className="text-amber-500 text-xs">N/A</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right font-semibold text-blue-700">
+                  {cl.licenseCost > 0 ? fmt(cl.licenseCost) : "—"}
+                </td>
+                <td className="px-4 py-3 text-right text-amber-700">
+                  {cl.annualSupport > 0 ? fmt(cl.annualSupport) : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
+            <tr>
+              <td className="px-4 py-3 text-gray-900" colSpan={5}>Total</td>
+              <td className="px-4 py-3 text-right text-blue-700">{fmt(totalLicenseCost)}</td>
+              <td className="px-4 py-3 text-right text-amber-700">{fmt(totalAnnualSupport)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {/* Disclaimer */}
+      <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+        <h4 className="text-sm font-semibold text-blue-800 mb-2">Important Disclaimer</h4>
+        <ul className="text-xs text-blue-700 space-y-1 list-disc list-inside">
+          <li>Prices shown are <strong>Oracle list prices (USD)</strong> from the E-Business Suite Applications Global Price List.</li>
+          <li>Actual contract prices typically include 30–60% discounts depending on deal size and negotiation.</li>
+          <li>Use the discount slider above to model different discount scenarios.</li>
+          <li>Annual support is calculated at <strong>22%</strong> of net license fees (Oracle Software Update License & Support).</li>
+          <li>Products marked <strong>N/A</strong> do not have list price data available — consult Oracle or your licensing advisor.</li>
+          <li>Some modules may be included in suite/bundle deals at reduced per-module cost.</li>
+          <li>This is an <strong>estimate only</strong> — always verify with your Oracle contract and sales representative.</li>
+        </ul>
+      </div>
     </div>
   );
 }

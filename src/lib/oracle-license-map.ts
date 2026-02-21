@@ -22,6 +22,153 @@ export interface OracleLicenseProduct {
   partNumber?: string;
 }
 
+/**
+ * Oracle EBS List Prices (USD) per user
+ *
+ * Based on the Oracle E-Business Suite Applications Global Price List.
+ * These are LIST prices — actual contract prices vary significantly (30–60% discount typical).
+ * Annual support = 22% of net license fee (Software Update License & Support).
+ *
+ * Key: product name (matching productName in ORACLE_LICENSE_MAP)
+ * Value: list price per user in USD
+ */
+export const ORACLE_LIST_PRICES: Record<string, number> = {
+  // ─── Financials ────────────────────────────────────────────────
+  "Oracle General Ledger": 4595,
+  "Oracle Payables": 4595,
+  "Oracle Receivables": 4595,
+  "Oracle Assets": 4595,
+  "Oracle Cash Management": 4595,
+  "Oracle Advanced Collections": 4595,
+  "Oracle E-Business Tax": 4595,
+  "Oracle Payments": 4595,
+  "Oracle Subledger Accounting": 4595,
+  "Oracle Legal Entity Configurator": 4595,
+  "Oracle Treasury": 4595,
+  "Oracle Lease and Finance Management": 4595,
+  "Oracle Loans": 4595,
+  "Oracle Property Manager": 4595,
+  "Oracle Internal Controls Manager": 4595,
+  "Oracle Report Manager": 2300,
+  "Oracle Financial Consolidation Hub": 4595,
+  "Oracle Enterprise Performance Foundation": 4595,
+  "Oracle Profitability Manager": 4595,
+  "Oracle Enterprise Planning and Budgeting": 4595,
+  "Oracle Risk Management": 4595,
+
+  // ─── Public Sector ──────────────────────────────────────────────
+  "Oracle Public Sector Financials International": 4595,
+  "Oracle Public Sector Advanced Features": 4595,
+  "Oracle Public Sector Budgeting": 4595,
+  "Oracle Labor Distribution": 4595,
+  "Oracle Federal Financials": 4595,
+
+  // ─── Supply Chain Management ──────────────────────────────────
+  "Oracle Inventory Management": 4595,
+  "Oracle Bills of Material": 4595,
+  "Oracle Work in Process": 4595,
+  "Oracle Engineering": 4595,
+  "Oracle Master Scheduling / MRP": 4595,
+  "Oracle Capacity": 4595,
+  "Oracle Quality": 4595,
+  "Oracle Advanced Pricing": 4595,
+  "Oracle Cost Management": 4595,
+  "Oracle Enterprise Asset Management": 4595,
+  "Oracle Warehouse Management": 4595,
+  "Oracle Shipping Execution": 4595,
+  "Oracle Shop Floor Management": 4595,
+  "Oracle Flow Manufacturing": 4595,
+  "Oracle Manufacturing Scheduling": 6000,
+  "Oracle Order Management": 4595,
+  "Oracle Manufacturing": 4595,
+  "Oracle Advanced Supply Chain Planning": 6000,
+  "Oracle Demand Planning": 6000,
+  "Oracle Constraint Based Optimization": 6000,
+  "Oracle Inventory Optimization": 6000,
+  "Oracle Transportation Planning": 6000,
+  "Oracle Inventory": 4595,
+  "Oracle Landed Cost Management": 4595,
+  "Oracle Configurator": 4595,
+  "Oracle Advanced Product Catalog": 4595,
+
+  // ─── Process Manufacturing ────────────────────────────────────
+  "Oracle Process Manufacturing": 4595,
+  "Oracle Process Manufacturing Systems": 4595,
+  "Oracle Process Manufacturing - Product Development": 4595,
+  "Oracle Process Manufacturing - Process Execution": 4595,
+  "Oracle Process Manufacturing - Financials": 4595,
+  "Oracle Process Manufacturing - Logistics": 4595,
+  "Oracle Process Manufacturing - Inventory": 4595,
+
+  // ─── Procurement ───────────────────────────────────────────────
+  "Oracle Purchasing": 4595,
+  "Oracle iProcurement": 115,
+  "Oracle iSupplier Portal": 115,
+  "Oracle Sourcing": 4595,
+  "Oracle Project Contracts": 4595,
+
+  // ─── Order Management ──────────────────────────────────────────
+  "Oracle Order Capture / Quoting": 4595,
+  "Oracle Quoting": 4595,
+  "Oracle Service Contracts": 4595,
+
+  // ─── Human Resources ───────────────────────────────────────────
+  "Oracle Human Resources": 4595,
+  "Oracle Payroll": 4595,
+  "Oracle Advanced Benefits": 4595,
+  "Oracle Learning Management": 4595,
+  "Oracle iRecruitment": 115,
+  "Oracle Time and Labor": 4595,
+  "Oracle Time and Labor Engine": 4595,
+  "Oracle Approvals Management": 4595,
+
+  // ─── CRM ──────────────────────────────────────────────────────
+  "Oracle Sales": 4000,
+  "Oracle Sales Foundation": 4000,
+  "Oracle TeleSales": 4000,
+  "Oracle Service (TeleService)": 4000,
+  "Oracle Field Service": 4000,
+  "Oracle Call Center": 4000,
+  "Oracle Spares Management": 4000,
+  "Oracle Customer Care": 4000,
+  "Oracle Depot Repair": 4000,
+  "Oracle Install Base": 4000,
+  "Oracle Marketing": 4000,
+  "Oracle Incentive Compensation": 4000,
+  "Oracle iStore": 115,
+  "Oracle iSupport": 115,
+  "Oracle Customers Online": 115,
+  "Oracle Trade Management": 4000,
+  "Oracle Partner Management": 4000,
+
+  // ─── Projects ──────────────────────────────────────────────────
+  "Oracle Projects": 4595,
+  "Oracle Grants Accounting": 4595,
+  "Oracle Project Manufacturing": 4595,
+  "Oracle Project Intelligence": 3000,
+  "Oracle Project Portfolio Analysis": 3000,
+
+  // ─── Business Intelligence ─────────────────────────────────────
+  "Oracle Business Intelligence System": 3000,
+  "Oracle Sales Intelligence": 3000,
+  "Oracle Service Intelligence": 3000,
+  "Oracle Marketing Intelligence": 3000,
+  "Oracle Customer Intelligence": 3000,
+  "Oracle Supply Chain Intelligence": 3000,
+  "Oracle Financial Intelligence": 3000,
+  "Oracle Operations Intelligence": 3000,
+  "Oracle HRMS Intelligence": 3000,
+
+  // ─── Mobile Supply Chain ───────────────────────────────────────
+  "Oracle Mobile Supply Chain Applications": 4595,
+
+  // ─── Industry ──────────────────────────────────────────────────
+  "Oracle Complex Maintenance Repair and Overhaul": 4595,
+};
+
+/** Annual support percentage of net license fee */
+export const ORACLE_ANNUAL_SUPPORT_PCT = 0.22;
+
 /** Map from APPLICATION_SHORT_NAME -> license info */
 export const ORACLE_LICENSE_MAP: Record<string, OracleLicenseProduct> = {
   // ─── Financials ────────────────────────────────────────────────
