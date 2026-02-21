@@ -113,14 +113,14 @@ export default function OracleAnalyzer() {
 
   const runAnalysis = useCallback(() => {
     setAnalyzing(true);
-    console.log(`[OracleAnalyzer v3] Running analysis with ${Object.keys(tables).length} tables: [${Object.keys(tables).join(", ")}]`);
+    console.log(`[OracleAnalyzer v5] Running analysis with ${Object.keys(tables).length} tables: [${Object.keys(tables).join(", ")}]`);
     for (const [name, csv] of Object.entries(tables)) {
-      console.log(`[OracleAnalyzer v3] Table "${name}": ${csv.rows.length} rows, headers=[${csv.headers.slice(0, 5).join(", ")}]`);
+      console.log(`[OracleAnalyzer v5] Table "${name}": ${csv.rows.length} rows, headers=[${csv.headers.slice(0, 5).join(", ")}]`);
     }
     // Use setTimeout to let the UI update with the loading state
     setTimeout(() => {
       const analysisResult = analyzeOracleEBS(tables);
-      console.log(`[OracleAnalyzer v3] Analysis complete: ${analysisResult.applications.length} apps, ${analysisResult.installedModules.length} modules, ${analysisResult.licenseSummary.length} licenses, ${analysisResult.warnings.length} warnings`);
+      console.log(`[OracleAnalyzer v5] Analysis complete: ${analysisResult.applications.length} apps, ${analysisResult.installedModules.length} modules, ${analysisResult.licenseSummary.length} licenses, ${analysisResult.warnings.length} warnings`);
       setResult(analysisResult);
       setActiveTab("summary");
       setAnalyzing(false);
@@ -144,7 +144,7 @@ export default function OracleAnalyzer() {
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Oracle EBS License Analyzer <span className="text-xs font-normal text-gray-400">v3</span></h1>
+        <h1 className="text-3xl font-bold text-gray-900">Oracle EBS License Analyzer <span className="text-xs font-normal text-gray-400">v5</span></h1>
         <p className="mt-2 text-gray-600">
           Drop your Oracle LMS collection CSV files to analyze which E-Business Suite licenses are required.
         </p>
@@ -296,7 +296,7 @@ export default function OracleAnalyzer() {
 
           {/* DEBUG PANEL — shows raw table data for troubleshooting */}
           <div className="mb-6 rounded-lg border-2 border-red-300 bg-red-50 p-4">
-            <h3 className="text-sm font-bold text-red-800 mb-2">DEBUG: Raw Loaded Tables</h3>
+            <h3 className="text-sm font-bold text-red-800 mb-2">DEBUG: Raw Loaded Tables <span className="text-red-400 font-mono">(parser v5-lms-prescan)</span></h3>
             <p className="text-xs text-red-700 mb-2">
               Tables in state: {Object.keys(tables).length} |
               Keys: [{Object.keys(tables).join(", ") || "NONE"}]
