@@ -1,8 +1,14 @@
 /**
  * CSV Parser for Oracle LMS Collection files.
- * Handles: quoted fields, commas inside quotes, BOM, pipe-delimited,
- * tab-delimited, semicolon-delimited, SQL*Plus spool format,
- * and leading metadata/comment lines.
+ *
+ * Handles two main file formats:
+ * 1. Oracle LMS SQL spool format (CHR(35)||'^~*~^'||COLUMN||... headers with
+ *    #^~*~^value^~*~^ data lines) — parsed with a dedicated LMS parser that
+ *    bypasses CSV quote handling entirely.
+ * 2. Standard CSV/TSV/pipe/semicolon delimited files — parsed with traditional
+ *    CSV logic including quoted-field support.
+ *
+ * Also handles: BOM, null bytes, SQL*Plus metadata lines, and leading comments.
  */
 
 export interface ParsedCSV {
@@ -41,47 +47,51 @@ const KNOWN_ORACLE_COLUMNS = new Set([
 //   DATA   = evaluated output, e.g.:
 //     #^~*~^200^~*~^;^~*~^GL^~*~^;^~*~^General Ledger^~*~^
 //
-// We detect this format and parse it with dedicated logic.
+// IMPORTANT: These files often wrap each line in double-quotes, which breaks
+// standard CSV line-splitting (the " chars in SQL expressions toggle quote
+// state). We detect LMS format early via a raw-text pre-scan and use simple
+// newline splitting instead.
 
 /** The Oracle LMS "caret" delimiter token */
 const LMS_CARET_DELIM = "^~*~^";
 
+// ─── LMS format detection & parsing ─────────────────────────────
+
 /**
- * Detect whether a line is an Oracle LMS SQL expression header.
- *
- * These lines contain CHR(35) and the ^~*~^ token (with or without
- * surrounding single-quotes) connected by || SQL concatenation.
- * The line may optionally be wrapped in outer double-quotes.
- *
- * Patterns matched:
- *   CHR(35)||'^~*~^'||COLUMN||'^~*~^'||';'||...
- *   "CHR(35)||'^~*~^'||COLUMN||'^~*~^'||';'||..."
- *   CHR(35)||^~*~^||COLUMN||^~*~^||;||...
+ * Pre-scan raw file text to determine if it uses Oracle LMS format.
+ * Checks for CHR(35) and ^~*~^ anywhere in the file content.
+ */
+function isLMSFileContent(text: string): boolean {
+  return /CHR\s*\(\s*35\s*\)/i.test(text) && text.includes(LMS_CARET_DELIM);
+}
+
+/**
+ * Detect whether a single line is an Oracle LMS SQL expression header.
  */
 function isOracleLMSSQLHeader(line: string): boolean {
-  // Check for CHR(35) anywhere in the line (with flexible whitespace)
-  const hasCHR35 = /CHR\s*\(\s*35\s*\)/i.test(line);
-  // Check for ^~*~^ token (with or without surrounding quotes)
-  const hasCaret = /\^~\*~\^/.test(line);
-  // Check for || SQL concatenation
-  const hasConcat = line.includes("||");
-  return hasCHR35 && hasCaret && hasConcat;
+  return /CHR\s*\(\s*35\s*\)/i.test(line) && line.includes(LMS_CARET_DELIM) && line.includes("||");
+}
+
+/**
+ * Check whether a data line uses ^~*~^ wrapping (LMS output format).
+ */
+function isLMSDataLine(line: string): boolean {
+  return line.includes(LMS_CARET_DELIM);
 }
 
 /**
  * Extract column names from an Oracle LMS SQL SELECT expression.
  *
- * Input:  CHR(35)||'^~*~^'||APPLICATION_ID||'^~*~^'||';'||'^~*~^'||TO_CHAR(CREATION_DATE,'MM/DD/YYYY HH:MI:SS AM')||'^~*~^'
+ * Input:  CHR(35)||'^~*~^'||APPLICATION_ID||'^~*~^'||';'||'^~*~^'||TO_CHAR(CREATION_DATE,'MM/DD/YYYY')||'^~*~^'
  * Output: ["APPLICATION_ID", "CREATION_DATE"]
  */
 function extractColumnsFromLMSSQL(sqlLine: string): string[] {
-  // Strip outer double-quotes (some exports wrap the entire SQL in quotes)
+  // Strip outer double-quotes
   let clean = sqlLine.trim();
   if (clean.startsWith('"')) clean = clean.slice(1);
   if (clean.endsWith('"')) clean = clean.slice(0, -1);
 
   // Split on ||';'|| or ||;|| to separate field segments
-  // The ';' or ; literal is the separator between field blocks
   const segments = clean.split(/\|\|\s*'?;'?\s*\|\|/);
 
   const columns: string[] = [];
@@ -100,7 +110,6 @@ function extractColumnsFromLMSSQL(sqlLine: string): string[] {
     if (!col) continue;
 
     // Handle SQL functions: TO_CHAR(COL, 'FMT'), NVL(COL, 'default'), etc.
-    // Extract the first column-name argument
     const funcMatch = col.match(
       /^(?:TO_CHAR|TO_NUMBER|TO_DATE|NVL|NVL2|DECODE|UPPER|LOWER|TRIM|SUBSTR|REPLACE|ROUND|TRUNC)\s*\(\s*([A-Z_][A-Z0-9_.]*)/i
     );
@@ -111,11 +120,10 @@ function extractColumnsFromLMSSQL(sqlLine: string): string[] {
     // Handle aliased expressions: COLUMN_NAME ALIAS or COLUMN_NAME "ALIAS"
     const aliasMatch = col.match(/^([A-Z_][A-Z0-9_.]*)\s+(?:AS\s+)?["']?([A-Z_][A-Z0-9_]*)["']?$/i);
     if (aliasMatch) {
-      // Prefer the alias if present
       col = aliasMatch[2] || aliasMatch[1];
     }
 
-    // Only accept valid column names (letters, digits, underscore)
+    // Only accept valid column names
     if (/^[A-Z_][A-Z0-9_.]*$/i.test(col)) {
       columns.push(col.toUpperCase());
     }
@@ -127,18 +135,13 @@ function extractColumnsFromLMSSQL(sqlLine: string): string[] {
 /**
  * Parse an Oracle LMS data line.
  * Format: #^~*~^value1^~*~^;^~*~^value2^~*~^;^~*~^value3^~*~^
- * May also be wrapped in outer double-quotes:
- *   "#^~*~^value1^~*~^;^~*~^value2^~*~^"
- *
- * The leading # is from CHR(35), ^~*~^ wraps each value,
- * and ; separates the field blocks.
+ * May also be wrapped in outer double-quotes.
  */
 function parseLMSDataLine(line: string): string[] {
-  // Strip outer double-quotes
   let clean = line.trim();
+  // Strip outer double-quotes
   if (clean.startsWith('"')) clean = clean.slice(1);
   if (clean.endsWith('"')) clean = clean.slice(0, -1);
-
   // Strip leading/trailing # (CHR(35) artifact)
   clean = clean.replace(/^#+/, "").replace(/#+$/, "");
 
@@ -152,13 +155,86 @@ function parseLMSDataLine(line: string): string[] {
 }
 
 /**
- * Check whether a data line uses ^~*~^ wrapping (LMS output format).
- * Returns true if '^~*~^' appears as a literal token in the line.
- * Handles lines wrapped in outer double-quotes.
+ * Parse an entire file that uses Oracle LMS SQL/data format.
+ *
+ * Uses simple newline splitting (NOT CSV-aware splitCSVLines) because LMS
+ * files contain " characters in SQL expressions that break CSV quote tracking.
  */
-function isLMSDataLine(line: string): boolean {
-  return line.includes(LMS_CARET_DELIM);
+function parseLMSFile(text: string): ParsedCSV {
+  // Simple newline split — no CSV quote handling needed for LMS files
+  const rawLines = text.split(/\r?\n/);
+
+  // Find the SQL header line (contains CHR(35) and ^~*~^)
+  let headerIdx = -1;
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i].trim();
+    if (!line) continue;
+    if (isOracleLMSSQLHeader(line)) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  // Fallback: if no SQL header found, look for first LMS data line
+  if (headerIdx < 0) {
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i].trim();
+      if (line && isLMSDataLine(line)) {
+        headerIdx = i;
+        break;
+      }
+    }
+  }
+
+  if (headerIdx < 0) {
+    return { headers: [], rows: [], rawHeaderLine: rawLines[0] || "", detectedDelimiter: "LMS_SQL", skippedLines: 0 };
+  }
+
+  const rawHeaderLine = rawLines[headerIdx];
+  const headers = isOracleLMSSQLHeader(rawHeaderLine)
+    ? extractColumnsFromLMSSQL(rawHeaderLine)
+    : parseLMSDataLine(rawHeaderLine).map(h => h.toUpperCase());
+
+  console.log(`[parseLMSFile] Found ${headers.length} columns: [${headers.slice(0, 5).join(", ")}${headers.length > 5 ? " ..." : ""}]`);
+  console.log(`[parseLMSFile] Header line (first 120 chars): "${rawHeaderLine.substring(0, 120)}"`);
+
+  const rows: Record<string, string>[] = [];
+  for (let i = headerIdx + 1; i < rawLines.length; i++) {
+    const line = rawLines[i].trim();
+    if (!line) continue;
+    // Stop at SQL*Plus footer lines
+    if (/^\d+ rows? selected/i.test(line)) break;
+    if (/^no rows selected/i.test(line)) break;
+    if (/^Elapsed:/i.test(line)) continue;
+    if (/^PL\/SQL procedure/i.test(line)) continue;
+
+    // Only parse lines that contain the LMS delimiter
+    if (!isLMSDataLine(line)) continue;
+
+    const values = parseLMSDataLine(line);
+    if (values.length === 0) continue;
+
+    const row: Record<string, string> = {};
+    for (let j = 0; j < headers.length; j++) {
+      if (headers[j]) {
+        row[headers[j]] = (values[j] ?? "").trim();
+      }
+    }
+    rows.push(row);
+  }
+
+  console.log(`[parseLMSFile] Parsed ${rows.length} data rows`);
+
+  return {
+    headers,
+    rows,
+    rawHeaderLine,
+    detectedDelimiter: "LMS_SQL",
+    skippedLines: headerIdx,
+  };
 }
+
+// ─── Standard (non-LMS) parsing helpers ─────────────────────────
 
 /**
  * Clean Oracle SQL artifacts from a raw value/header.
@@ -182,7 +258,6 @@ function isMetadataLine(line: string): boolean {
   if (t.startsWith("--")) return true;
   // Only treat '#' lines as comments if they look like actual comments,
   // NOT like LMS data (#^~*~^val^~*~^) or CHR(35) wrapped data (#val#,#val#)
-  // Also handle quoted lines ("# ...")
   const tUnquoted = t.startsWith('"') ? t.slice(1) : t;
   if ((t.startsWith("#") || tUnquoted.startsWith("#")) &&
       !t.includes(LMS_CARET_DELIM) &&
@@ -192,27 +267,19 @@ function isMetadataLine(line: string): boolean {
   if (/^SET\s/i.test(t)) return true;
   if (/^SPOOL\s/i.test(t)) return true;
   if (/^PROMPT\s/i.test(t)) return true;
-  if (/^\/\s*$/.test(t)) return true; // lone forward-slash (SQL*Plus run command)
-  // Line of only dashes and spaces (SQL*Plus column separator)
+  if (/^\/\s*$/.test(t)) return true;
   if (/^[-\s]+$/.test(t) && t.includes("-")) return true;
-  // Line of only dashes, spaces, and plus signs (SQL*Plus with pipes)
   if (/^[-+\s]+$/.test(t)) return true;
-  // Line of only equals and spaces (another separator style)
   if (/^[=\s]+$/.test(t) && t.includes("=")) return true;
-  // "X rows selected" footer
   if (/^\d+ rows? selected/i.test(t)) return true;
-  // "no rows selected"
   if (/^no rows selected/i.test(t)) return true;
-  // "Elapsed:" timing line
   if (/^Elapsed:/i.test(t)) return true;
-  // PL/SQL procedure
   if (/^PL\/SQL procedure/i.test(t)) return true;
   return false;
 }
 
 /** Count delimiter characters in a line (outside quotes) */
 function countDelimiters(line: string): number {
-  // LMS format lines have many delimiters — count field blocks instead
   if (isLMSDataLine(line) || isOracleLMSSQLHeader(line)) {
     return parseLMSDataLine(line).length;
   }
@@ -230,8 +297,6 @@ function countDelimiters(line: string): number {
 function hasKnownColumns(headers: string[]): boolean {
   return headers.some(h => {
     if (KNOWN_ORACLE_COLUMNS.has(h)) return true;
-    // Also try after cleaning Oracle SQL artifacts in case headers
-    // still have residual expressions
     const cleaned = cleanOracleSQL(h).toUpperCase();
     return cleaned !== h && KNOWN_ORACLE_COLUMNS.has(cleaned);
   });
@@ -240,9 +305,7 @@ function hasKnownColumns(headers: string[]): boolean {
 /** Check if a line looks like a title/table-name rather than a real header row */
 function isTitleLine(line: string, nextLine?: string): boolean {
   const t = line.trim();
-  // Single word with no delimiters — likely a table name
   if (/^[A-Za-z_$#0-9.]+$/.test(t)) return true;
-  // If next line has significantly more delimiters, this is a title
   if (nextLine) {
     const thisDelims = countDelimiters(t);
     const nextDelims = countDelimiters(nextLine.trim());
@@ -253,14 +316,10 @@ function isTitleLine(line: string, nextLine?: string): boolean {
 
 /** Detect the best delimiter for a header line */
 function detectDelimiter(line: string): string {
-  // 1. Oracle LMS SQL format: CHR(35)||'^~*~^'||COL||'^~*~^'||';'||...
   if (isOracleLMSSQLHeader(line)) return "LMS_SQL";
-
-  // 2. Oracle LMS data format: #^~*~^val^~*~^;^~*~^val^~*~^
   if (isLMSDataLine(line)) return "LMS_DATA";
 
-  // 3. Standard delimiter detection — strip SQL artifacts first
-  //    so that || in CHR(35)||COLUMN doesn't inflate pipe counts
+  // Standard delimiter detection — strip SQL concat operators first
   const cleanedLine = line
     .replace(/CHR\(\d+\)\s*\|\|/gi, "")
     .replace(/\|\|\s*CHR\(\d+\)/gi, "")
@@ -293,12 +352,9 @@ function detectDelimiter(line: string): string {
 
 /** Parse header line into cleaned, uppercased names */
 function parseHeaderLine(rawLine: string, delimiter: string): string[] {
-  // Oracle LMS SQL expression header — extract columns from SQL
   if (delimiter === "LMS_SQL") {
     return extractColumnsFromLMSSQL(rawLine);
   }
-
-  // Oracle LMS data-style header (rare: first line is data-formatted column names)
   if (delimiter === "LMS_DATA") {
     return parseLMSDataLine(rawLine).map((h) => h.toUpperCase());
   }
@@ -318,7 +374,9 @@ function parseHeaderLine(rawLine: string, delimiter: string): string[] {
   });
 }
 
-/** Parse a CSV string into structured data */
+// ─── Main entry point ───────────────────────────────────────────
+
+/** Parse a CSV/LMS string into structured data */
 export function parseCSV(text: string): ParsedCSV {
   // Strip BOM (byte-order mark) that Windows CSV files often have
   if (text.charCodeAt(0) === 0xfeff) {
@@ -327,13 +385,23 @@ export function parseCSV(text: string): ParsedCSV {
   // Strip null bytes (UTF-16 artifacts when read as UTF-8)
   text = text.replace(/\x00/g, "");
 
-  // Split into raw lines first (respecting quoted fields)
+  // ── Pre-scan: detect Oracle LMS format before any line splitting ──
+  // This is critical because splitCSVLines uses " quote tracking which
+  // corrupts LMS SQL expression lines that contain " characters.
+  if (isLMSFileContent(text)) {
+    console.log("[parseCSV] LMS format detected via pre-scan — using dedicated LMS parser");
+    return parseLMSFile(text);
+  }
+
+  // ── Standard CSV parsing for non-LMS files ──
+  console.log("[parseCSV] Standard CSV format — using CSV parser");
+
   const allLines = splitCSVLines(text);
   if (allLines.length === 0) {
     return { headers: [], rows: [], rawHeaderLine: "", detectedDelimiter: ",", skippedLines: 0 };
   }
 
-  // Skip metadata/comment/separator lines at the top to find the real header
+  // Skip metadata/comment/separator lines at the top
   let headerIndex = 0;
   while (headerIndex < allLines.length && isMetadataLine(allLines[headerIndex])) {
     headerIndex++;
@@ -366,17 +434,15 @@ export function parseCSV(text: string): ParsedCSV {
   let delimiter = detectDelimiter(rawHeaderLine);
   let headers = parseHeaderLine(rawHeaderLine, delimiter);
 
-  // Diagnostic: log LMS detection for troubleshooting
-  console.log(`[parseCSV] headerLine[0..80]: "${rawHeaderLine.substring(0, 80)}"`,
-    `| isLMS=${isOracleLMSSQLHeader(rawHeaderLine)}`,
-    `| hasCaretToken=${/\^~\*~\^/.test(rawHeaderLine)}`,
-    `| hasCHR35=${/CHR\s*\(\s*35\s*\)/i.test(rawHeaderLine)}`,
-    `| hasConcat=${rawHeaderLine.includes("||")}`,
-    `| detectedDelim="${delimiter}"`,
-    `| headers(first3)=[${headers.slice(0, 3).join(", ")}]`);
+  console.log(`[parseCSV] delimiter="${delimiter}", headers(first5)=[${headers.slice(0, 5).join(", ")}]`);
 
-  // Validate: if headers don't contain any known Oracle columns AND there's a next line,
-  // try the next line as the real header (handles extra title/description lines)
+  // Safety net: if headers still contain LMS artifacts, force LMS re-parse
+  if (headers.some(h => h === "CHR(35)" || h.includes("^~*~^") || /^CHR\s*\(/i.test(h))) {
+    console.log("[parseCSV] Headers contain LMS artifacts — falling back to LMS parser");
+    return parseLMSFile(text);
+  }
+
+  // Validate: if headers don't contain known Oracle columns, try next line
   if (!hasKnownColumns(headers) && nextNonMetaIdx < allLines.length) {
     const altLine = allLines[nextNonMetaIdx];
     const altDelim = detectDelimiter(altLine);
@@ -389,14 +455,14 @@ export function parseCSV(text: string): ParsedCSV {
     }
   }
 
-  // Clean headers: remove any empty trailing headers
+  // Clean headers: remove empty trailing headers
   while (headers.length > 0 && headers[headers.length - 1] === "") {
     headers.pop();
   }
 
   const rows: Record<string, string>[] = [];
 
-  // Skip any separator lines right after headers (SQL*Plus style: "------  ------")
+  // Skip separator lines right after headers
   let dataStart = headerIndex + 1;
   while (dataStart < allLines.length && isMetadataLine(allLines[dataStart])) {
     dataStart++;
@@ -405,15 +471,12 @@ export function parseCSV(text: string): ParsedCSV {
   for (let i = dataStart; i < allLines.length; i++) {
     const line = allLines[i];
 
-    // Skip metadata lines in the middle too
     if (isMetadataLine(line)) continue;
-
-    // Stop at SQL*Plus "X rows selected" footer
     if (/^\d+ rows? selected/i.test(line.trim())) break;
 
     let values: string[];
-    if (delimiter === "LMS_SQL" || delimiter === "LMS_DATA") {
-      // Data lines in LMS format: #^~*~^val^~*~^;^~*~^val^~*~^
+    // Even in standard mode, if a data line looks like LMS data, parse it as such
+    if (isLMSDataLine(line)) {
       values = parseLMSDataLine(line);
     } else if (delimiter === "WHITESPACE") {
       values = splitFixedWidth(rawHeaderLine, line);
@@ -427,7 +490,6 @@ export function parseCSV(text: string): ParsedCSV {
     for (let j = 0; j < headers.length; j++) {
       if (headers[j]) {
         let val = (values[j] ?? "").trim();
-        // Strip '#' wrappers from values (CHR(35) artifact)
         val = val.replace(/^#+|#+$/g, "");
         row[headers[j]] = val;
       }
@@ -440,13 +502,11 @@ export function parseCSV(text: string): ParsedCSV {
 
 /** Split fixed-width output based on header column positions */
 function splitFixedWidth(headerLine: string, dataLine: string): string[] {
-  // Find column boundaries by looking at spaces in the header
   const boundaries: number[] = [0];
   let inWord = false;
   for (let i = 0; i < headerLine.length; i++) {
     const isSpace = headerLine[i] === " " || headerLine[i] === "\t";
     if (inWord && isSpace) {
-      // Check if this is a multi-space gap (column boundary)
       let gapEnd = i;
       while (gapEnd < headerLine.length && (headerLine[gapEnd] === " " || headerLine[gapEnd] === "\t")) {
         gapEnd++;
@@ -519,6 +579,8 @@ function parseCSVLine(line: string, delimiter: string = ","): string[] {
   return fields;
 }
 
+// ─── File identification & constants ────────────────────────────
+
 /** Known Oracle table base names and which table they represent */
 export const KNOWN_FILES: Record<string, string> = {
   "FND_APPLICATION": "FND_APPLICATION",
@@ -553,27 +615,23 @@ export const KNOWN_FILES: Record<string, string> = {
 /** Identify which Oracle table a filename corresponds to */
 export function identifyFile(filename: string): string | null {
   const lower = filename.toLowerCase();
-  // Accept .csv, .txt, and .dat files
   if (!lower.endsWith(".csv") && !lower.endsWith(".txt") && !lower.endsWith(".dat")) return null;
 
-  // Strip extension and uppercase for matching
   const fileBase = filename.replace(/\.(csv|txt|dat)$/i, "").toUpperCase().trim();
-
-  // Sort by longest key first to avoid partial matches (e.g. FND_USER vs FND_USER_RESP_GROUPS)
   const sortedEntries = Object.entries(KNOWN_FILES).sort((a, b) => b[0].length - a[0].length);
 
-  // 1. Exact match on base name
+  // 1. Exact match
   for (const [knownBase, table] of sortedEntries) {
     if (fileBase === knownBase.toUpperCase()) return table;
   }
 
-  // 2. Strip common numeric/date prefixes like "01_", "001_", "20240101_"
+  // 2. Strip numeric/date prefixes
   const strippedBase = fileBase.replace(/^\d+[_\-\s]+/, "");
   for (const [knownBase, table] of sortedEntries) {
     if (strippedBase === knownBase.toUpperCase()) return table;
   }
 
-  // 3. Suffix match: file ends with known table name (e.g. "LMS_FND_APPLICATION")
+  // 3. Suffix match
   for (const [knownBase, table] of sortedEntries) {
     const upper = knownBase.toUpperCase();
     if (fileBase.endsWith(upper) && (fileBase.length === upper.length || !/[A-Z]/.test(fileBase[fileBase.length - upper.length - 1] || ""))) {
@@ -581,7 +639,7 @@ export function identifyFile(filename: string): string | null {
     }
   }
 
-  // 4. Prefix match: file starts with known table name, followed by non-alpha
+  // 4. Prefix match
   for (const [knownBase, table] of sortedEntries) {
     const upper = knownBase.toUpperCase();
     if (fileBase.startsWith(upper) && !/[A-Z]/.test(fileBase[upper.length] || "")) {
@@ -592,7 +650,7 @@ export function identifyFile(filename: string): string | null {
     }
   }
 
-  // 5. Substring match: known table name appears bounded by non-alpha chars
+  // 5. Substring match
   for (const [knownBase, table] of sortedEntries) {
     const upper = knownBase.toUpperCase();
     const idx = fileBase.indexOf(upper);
