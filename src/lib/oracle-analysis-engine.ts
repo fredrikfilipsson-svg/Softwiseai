@@ -27,6 +27,14 @@ export interface AppInfo {
   displayName: string;
 }
 
+export interface ModuleUserDetail {
+  userId: string;
+  userName: string;
+  isActive: boolean;
+  lastLogonDate: string;
+  isSelfService: boolean;
+}
+
 export interface InstalledModule {
   applicationId: string;
   shortName: string;
@@ -39,6 +47,19 @@ export interface InstalledModule {
   selfServiceUsers: number;
   applicationUsers: number;
   responsibilities: string[];
+  /** Detailed user list for this module */
+  users: ModuleUserDetail[];
+}
+
+export interface UserResponsibilityDetail {
+  userId: string;
+  userName: string;
+  responsibilityName: string;
+  applicationShortName: string;
+  applicationName: string;
+  isActive: boolean;
+  lastLogonDate: string;
+  isSelfService: boolean;
 }
 
 export interface UserInfo {
@@ -84,6 +105,8 @@ export interface AnalysisResult {
     usersWithResponsibilities: number;
     usersWithLogins: number;
   };
+  /** User-responsibility detail report */
+  userResponsibilities: UserResponsibilityDetail[];
   /** Warnings & findings */
   warnings: string[];
   /** Summary counts */
@@ -143,41 +166,18 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
       installedModules: [],
       unusedModules: [],
       licenseSummary: [],
+      userResponsibilities: [],
       userStats: { totalUsers: 0, activeUsers: 0, inactiveUsers: 0, usersWithResponsibilities: 0, usersWithLogins: 0 },
       warnings: ["Critical files missing: " + missingFiles.join(", ") + ". Cannot perform analysis."],
       counts: { installedModules: 0, licensedProducts: 0, families: 0, totalAppUsers: 0, totalSelfServiceUsers: 0 },
     };
   }
 
-  // ── Always report diagnostic info for critical tables ────────
-  const criticalTables = ["FND_APPLICATION", "FND_PRODUCT_INSTALLATIONS", "FND_USER", "FND_RESPONSIBILITY"];
-  for (const tName of criticalTables) {
-    const t = tables[tName];
-    if (!t) continue;
-    const hdr = t.headers.length > 0 ? t.headers.slice(0, 8).join(", ") + (t.headers.length > 8 ? ` ... (${t.headers.length} total)` : "") : "(no headers found)";
-    const delim = t.detectedDelimiter === "\t" ? "TAB" : t.detectedDelimiter === "WHITESPACE" ? "WHITESPACE" : `"${t.detectedDelimiter}"`;
-    warnings.push(
-      `[Debug] ${tName}: ${t.rows.length} rows, delimiter=${delim}, skipped=${t.skippedLines} lines, headers=[${hdr}]`
-    );
-  }
-
   if (tables.FND_APPLICATION.rows.length === 0) {
-    warnings.push("FND_APPLICATION file was loaded but contains 0 data rows. The file may be empty or use an unsupported format.");
-    if (tables.FND_APPLICATION.rawHeaderLine) {
-      warnings.push(`FND_APPLICATION raw header line: "${tables.FND_APPLICATION.rawHeaderLine.substring(0, 200)}"`);
-    }
+    warnings.push("FND_APPLICATION file was loaded but contains 0 data rows.");
   }
   if (tables.FND_PRODUCT_INSTALLATIONS.rows.length === 0) {
-    warnings.push("FND_PRODUCT_INSTALLATIONS file was loaded but contains 0 data rows. The file may be empty or use an unsupported format.");
-  } else {
-    const sampleRow = tables.FND_PRODUCT_INSTALLATIONS.rows[0];
-    const statusVal = findColumn(sampleRow, "STATUS", "INSTALL_STATUS");
-    if (!statusVal) {
-      const cols = Object.keys(sampleRow).join(", ");
-      warnings.push(
-        `FND_PRODUCT_INSTALLATIONS: Could not find STATUS column. Available columns: ${cols}`
-      );
-    }
+    warnings.push("FND_PRODUCT_INSTALLATIONS file was loaded but contains 0 data rows.");
   }
 
   // ── 1. Build application map ─────────────────────────────────
@@ -418,6 +418,7 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
     const moduleActiveUsers = new Set<string>();
     const moduleSelfServiceUsers = new Set<string>();
     const moduleAppUsers = new Set<string>();
+    const moduleUserDetails: ModuleUserDetail[] = [];
 
     for (const [userId, userResps] of userRespAssignments.entries()) {
       const user = userMap.get(userId);
@@ -427,22 +428,30 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
       if (!hasRespForApp) continue;
 
       moduleUsers.add(userId);
+
+      // Determine if self-service or application user
+      const isSS = appRespKeys.some((rk) => {
+        if (!userResps.has(rk)) return false;
+        const resp = respMap.get(rk);
+        return resp ? isSelfServiceResp(resp.displayName, appInfo.shortName) : false;
+      });
+
       if (user.isActive) {
         moduleActiveUsers.add(userId);
-
-        // Determine if self-service or application user
-        const isSelfService = appRespKeys.some((rk) => {
-          if (!userResps.has(rk)) return false;
-          const resp = respMap.get(rk);
-          return resp ? isSelfServiceResp(resp.displayName, appInfo.shortName) : false;
-        });
-
-        if (isSelfService) {
+        if (isSS) {
           moduleSelfServiceUsers.add(userId);
         } else {
           moduleAppUsers.add(userId);
         }
       }
+
+      moduleUserDetails.push({
+        userId: user.userId,
+        userName: user.userName,
+        isActive: user.isActive,
+        lastLogonDate: user.lastLogonDate,
+        isSelfService: isSS,
+      });
     }
 
     const mod: InstalledModule = {
@@ -456,7 +465,8 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
       activeUsers: moduleActiveUsers.size,
       selfServiceUsers: moduleSelfServiceUsers.size,
       applicationUsers: moduleAppUsers.size,
-      responsibilities: appResps.slice(0, 20), // cap for display
+      responsibilities: appResps.slice(0, 20),
+      users: moduleUserDetails,
     };
 
     if (moduleUsers.size === 0 && !licenseProduct?.isBase) {
@@ -465,25 +475,45 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
     installedModules.push(mod);
   }
 
-  // ── Step 7 diagnostics ──
-  warnings.push(
-    `[Diag] FND_PRODUCT_INSTALLATIONS pipeline: ${diagTotalRows} total rows → ` +
-    `${diagSkippedStatus} skipped (status not I/S${diagSkippedStatuses.length > 0 ? `, values: ${diagSkippedStatuses.map(s => `"${s}"`).join(",")}` : ""}) → ` +
-    `${diagSkippedNoApp} skipped (no appMap match) → ` +
-    `${diagInstalledRows} installed modules found`
+  // Log diagnostics to console only (not shown in UI)
+  console.log(`[Analysis] FND_PRODUCT_INSTALLATIONS: ${diagTotalRows} rows, ${diagSkippedStatus} skipped (status), ${diagSkippedNoApp} skipped (no app), ${diagInstalledRows} installed`);
+  console.log(`[Analysis] License: ${diagHasLicense} mapped, ${diagIsBase} base, shortNames: [${diagShortNames.join(", ")}]`);
+  console.log(`[Analysis] Maps: appMap=${appMap.size}, respMap=${respMap.size}, userResp=${userRespAssignments.size}, users=${userMap.size}`);
+
+  // ── 7b. Build user-responsibility detail report ──────────────
+  const userResponsibilities: UserResponsibilityDetail[] = [];
+
+  for (const [userId, userResps] of userRespAssignments.entries()) {
+    const user = userMap.get(userId);
+    if (!user) continue;
+
+    for (const respKey of userResps) {
+      const resp = respMap.get(respKey);
+      if (!resp) continue;
+
+      const appInfo = appMap.get(resp.applicationId);
+      const appShortName = appInfo?.shortName || "";
+      const isSS = isSelfServiceResp(resp.displayName, appShortName);
+
+      userResponsibilities.push({
+        userId: user.userId,
+        userName: user.userName,
+        responsibilityName: resp.displayName,
+        applicationShortName: appShortName,
+        applicationName: appInfo?.displayName || appShortName,
+        isActive: user.isActive,
+        lastLogonDate: user.lastLogonDate,
+        isSelfService: isSS,
+      });
+    }
+  }
+
+  // Sort by userName then responsibility
+  userResponsibilities.sort((a, b) =>
+    a.userName.localeCompare(b.userName) || a.responsibilityName.localeCompare(b.responsibilityName)
   );
-  warnings.push(
-    `[Diag] License mapping: ${diagHasLicense} have license product, ${diagIsBase} are base/technology, ` +
-    `${diagInstalledRows - diagHasLicense} have no mapping → ` +
-    `${installedModules.length} total in installedModules`
-  );
-  warnings.push(
-    `[Diag] First installed shortNames: [${diagShortNames.join(", ")}]`
-  );
-  warnings.push(
-    `[Diag] appMap has ${appMap.size} entries, respMap has ${respMap.size} entries, ` +
-    `userRespAssignments has ${userRespAssignments.size} entries, userMap has ${userMap.size} entries`
-  );
+
+  console.log(`[Analysis] User responsibilities: ${userResponsibilities.length} user-resp assignments`);
 
   // Sort: licensed products first, then by user count descending
   installedModules.sort((a, b) => {
@@ -520,12 +550,7 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
 
   const licenseSummary = Array.from(licenseSummaryMap.values()).sort((a, b) => b.activeUsers - a.activeUsers);
 
-  const installedNonBasePreview = installedModules.filter((m) => !m.licenseProduct?.isBase);
-  warnings.push(
-    `[Diag] License summary: ${licenseSummaryMap.size} unique products, ` +
-    `${installedNonBasePreview.length} non-base modules ` +
-    `(of ${installedModules.length} total installed)`
-  );
+  console.log(`[Analysis] License summary: ${licenseSummaryMap.size} products from ${installedModules.length} installed modules`);
 
   // ── 9. User stats ─────────────────────────────────────────────
   const totalUsers = userMap.size;
@@ -574,6 +599,7 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
     installedModules,
     unusedModules: unusedModules.filter((m) => !m.licenseProduct?.isBase),
     licenseSummary,
+    userResponsibilities,
     userStats: {
       totalUsers,
       activeUsers,

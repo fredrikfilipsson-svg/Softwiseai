@@ -30,7 +30,28 @@ export interface ComplianceRow {
   status: "compliant" | "under-licensed" | "over-licensed" | "not-deployed" | "not-owned";
 }
 
-type Tab = "summary" | "licenses" | "modules" | "users" | "warnings" | "compliance";
+type Tab = "summary" | "licenses" | "modules" | "users" | "responsibilities" | "warnings" | "compliance";
+
+/** Generate a CSV string from headers and rows, then trigger a browser download */
+function downloadCSV(filename: string, headers: string[], rows: string[][]) {
+  const escape = (val: string) => {
+    if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+      return `"${val.replace(/"/g, '""')}"`;
+    }
+    return val;
+  };
+  const csvLines = [
+    headers.map(escape).join(","),
+    ...rows.map((row) => row.map(escape).join(",")),
+  ];
+  const blob = new Blob([csvLines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function OracleAnalyzer() {
   const [loadedFiles, setLoadedFiles] = useState<LoadedFile[]>([]);
@@ -294,48 +315,6 @@ export default function OracleAnalyzer() {
             Load different files
           </button>
 
-          {/* DEBUG PANEL — shows raw table data for troubleshooting */}
-          <div className="mb-6 rounded-lg border-2 border-red-300 bg-red-50 p-4">
-            <h3 className="text-sm font-bold text-red-800 mb-2">DEBUG: Raw Loaded Tables <span className="text-red-400 font-mono">(parser v5-lms-prescan)</span></h3>
-            <p className="text-xs text-red-700 mb-2">
-              Tables in state: {Object.keys(tables).length} |
-              Keys: [{Object.keys(tables).join(", ") || "NONE"}]
-            </p>
-            <div className="space-y-2">
-              {Object.entries(tables).map(([name, csv]) => (
-                <div key={name} className="rounded bg-white border border-red-200 p-2 text-xs font-mono">
-                  <strong>{name}</strong>: {csv.rows.length} rows, {csv.headers.length} cols,
-                  delim=&quot;{csv.detectedDelimiter === "\t" ? "TAB" : csv.detectedDelimiter}&quot;,
-                  skipped={csv.skippedLines}
-                  <br />
-                  Headers: [{csv.headers.slice(0, 10).join(", ")}{csv.headers.length > 10 ? ` ... +${csv.headers.length - 10} more` : ""}]
-                  {csv.rows.length > 0 && (
-                    <>
-                      <br />
-                      Sample row 1: {JSON.stringify(csv.rows[0]).substring(0, 300)}
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-            {Object.keys(tables).length === 0 && (
-              <p className="text-xs text-red-600 font-bold mt-2">
-                WARNING: tables object is EMPTY — no CSV data was parsed!
-              </p>
-            )}
-            <div className="mt-3 border-t border-red-200 pt-2">
-              <p className="text-xs text-red-700">
-                Analysis result: {result.warnings.length} warnings,
-                {result.loadedFiles.length} loaded files in result,
-                {result.applications.length} apps,
-                {result.installedModules.length} modules
-              </p>
-              {result.warnings.map((w, i) => (
-                <p key={i} className="text-xs text-red-600 mt-1">Warning {i}: {w}</p>
-              ))}
-            </div>
-          </div>
-
           {/* Summary Cards */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
             <SummaryCard
@@ -372,6 +351,7 @@ export default function OracleAnalyzer() {
                 { key: "licenses", label: "Required Licenses" },
                 { key: "compliance", label: "Compliance" },
                 { key: "modules", label: "Installed Modules" },
+                { key: "responsibilities", label: "User Responsibilities" },
                 { key: "users", label: "User Statistics" },
                 { key: "warnings", label: `Findings (${result.warnings.length})` },
               ] as { key: Tab; label: string }[]).map((tab) => (
@@ -407,6 +387,7 @@ export default function OracleAnalyzer() {
               setExpandedModule={setExpandedModule}
             />
           )}
+          {activeTab === "responsibilities" && <TabUserResponsibilities result={result} />}
           {activeTab === "users" && <TabUsers result={result} />}
           {activeTab === "warnings" && <TabWarnings result={result} />}
         </div>
@@ -554,6 +535,19 @@ function TabModules({
   expandedModule: string | null;
   setExpandedModule: (v: string | null) => void;
 }) {
+  const exportModuleUsers = (mod: typeof result.installedModules[0]) => {
+    const headers = ["User Name", "User ID", "Active", "Last Logon Date", "User Type"];
+    const rows = mod.users.map((u) => [
+      u.userName,
+      u.userId,
+      u.isActive ? "Yes" : "No",
+      u.lastLogonDate || "Never",
+      u.isSelfService ? "Self-Service" : "Application",
+    ]);
+    const safeName = mod.shortName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    downloadCSV(`${safeName}_users.csv`, headers, rows);
+  };
+
   return (
     <div className="space-y-2">
       {result.installedModules.map((mod) => {
@@ -631,7 +625,7 @@ function TabModules({
                   </div>
                 </div>
                 {mod.responsibilities.length > 0 && (
-                  <div>
+                  <div className="mb-4">
                     <p className="text-xs text-gray-400 mb-2">Responsibilities ({mod.responsibilities.length})</p>
                     <div className="flex flex-wrap gap-1">
                       {mod.responsibilities.map((r, i) => (
@@ -642,11 +636,216 @@ function TabModules({
                     </div>
                   </div>
                 )}
+                {/* User Details Table */}
+                {mod.users.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs text-gray-400">Users ({mod.users.length})</p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); exportModuleUsers(mod); }}
+                        className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                        </svg>
+                        Export Excel
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto rounded-lg border border-gray-200">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-200 bg-gray-100 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                            <th className="px-3 py-2">User Name</th>
+                            <th className="px-3 py-2">User ID</th>
+                            <th className="px-3 py-2">Active</th>
+                            <th className="px-3 py-2">Last Logon</th>
+                            <th className="px-3 py-2">Type</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 bg-white">
+                          {mod.users.slice(0, 100).map((u, i) => (
+                            <tr key={i} className="hover:bg-gray-50/50">
+                              <td className="px-3 py-1.5 font-medium text-gray-900">{u.userName}</td>
+                              <td className="px-3 py-1.5 text-gray-500 font-mono">{u.userId}</td>
+                              <td className="px-3 py-1.5">
+                                <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                  u.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                                }`}>
+                                  {u.isActive ? "Active" : "Inactive"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-1.5 text-gray-500">{u.lastLogonDate || "Never"}</td>
+                              <td className="px-3 py-1.5">
+                                <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                  u.isSelfService ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+                                }`}>
+                                  {u.isSelfService ? "Self-Service" : "Application"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {mod.users.length > 100 && (
+                        <div className="px-3 py-2 text-xs text-gray-400 bg-gray-50 border-t border-gray-200">
+                          Showing first 100 of {mod.users.length} users. Export to Excel for the full list.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {mod.users.length === 0 && (
+                  <p className="text-xs text-gray-400 italic">No users assigned to this module.</p>
+                )}
               </div>
             )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function TabUserResponsibilities({ result }: { result: AnalysisResult }) {
+  const [filterUser, setFilterUser] = useState("");
+  const [filterApp, setFilterApp] = useState("");
+  const [filterActiveOnly, setFilterActiveOnly] = useState(false);
+
+  const filtered = result.userResponsibilities.filter((ur) => {
+    if (filterActiveOnly && !ur.isActive) return false;
+    if (filterUser && !ur.userName.toLowerCase().includes(filterUser.toLowerCase())) return false;
+    if (filterApp && !ur.applicationName.toLowerCase().includes(filterApp.toLowerCase()) &&
+        !ur.applicationShortName.toLowerCase().includes(filterApp.toLowerCase())) return false;
+    return true;
+  });
+
+  const exportAll = () => {
+    const data = filtered;
+    const headers = ["User Name", "User ID", "Responsibility", "Application", "Application Short Name", "Active", "Last Logon Date", "User Type"];
+    const rows = data.map((ur) => [
+      ur.userName,
+      ur.userId,
+      ur.responsibilityName,
+      ur.applicationName,
+      ur.applicationShortName,
+      ur.isActive ? "Yes" : "No",
+      ur.lastLogonDate || "Never",
+      ur.isSelfService ? "Self-Service" : "Application",
+    ]);
+    downloadCSV("user_responsibilities.csv", headers, rows);
+  };
+
+  // Group by user for summary
+  const uniqueUsers = new Set(filtered.map((ur) => ur.userId)).size;
+  const uniqueResps = new Set(filtered.map((ur) => ur.responsibilityName)).size;
+
+  return (
+    <div className="space-y-4">
+      {/* Summary + Export */}
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-gray-600">
+          <span className="font-semibold">{uniqueUsers.toLocaleString()}</span> users,{" "}
+          <span className="font-semibold">{uniqueResps.toLocaleString()}</span> responsibilities,{" "}
+          <span className="font-semibold">{filtered.length.toLocaleString()}</span> assignments
+          {filtered.length !== result.userResponsibilities.length && (
+            <span className="text-gray-400 ml-1">(filtered from {result.userResponsibilities.length.toLocaleString()})</span>
+          )}
+        </div>
+        <button
+          onClick={exportAll}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          Export to Excel
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="card !py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex-1 min-w-[200px]">
+            <input
+              type="text"
+              value={filterUser}
+              onChange={(e) => setFilterUser(e.target.value)}
+              placeholder="Filter by user name..."
+              className="input-field text-sm"
+            />
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <input
+              type="text"
+              value={filterApp}
+              onChange={(e) => setFilterApp(e.target.value)}
+              placeholder="Filter by application..."
+              className="input-field text-sm"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={filterActiveOnly}
+              onChange={(e) => setFilterActiveOnly(e.target.checked)}
+              className="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+            />
+            Active users only
+          </label>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="card overflow-x-auto !p-0">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-400">
+              <th className="px-4 py-3">User Name</th>
+              <th className="px-4 py-3">Responsibility</th>
+              <th className="px-4 py-3">Application</th>
+              <th className="px-4 py-3">Active</th>
+              <th className="px-4 py-3">Last Logon</th>
+              <th className="px-4 py-3">Type</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.slice(0, 200).map((ur, i) => (
+              <tr key={i} className="hover:bg-gray-50/50">
+                <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">{ur.userName}</td>
+                <td className="px-4 py-2.5 text-gray-700">{ur.responsibilityName}</td>
+                <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">
+                  <span className="font-mono text-xs">{ur.applicationShortName}</span>
+                </td>
+                <td className="px-4 py-2.5">
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    ur.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                  }`}>
+                    {ur.isActive ? "Active" : "Inactive"}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-gray-500 text-xs">{ur.lastLogonDate || "Never"}</td>
+                <td className="px-4 py-2.5">
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    ur.isSelfService ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
+                  }`}>
+                    {ur.isSelfService ? "Self-Service" : "Application"}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length > 200 && (
+          <div className="px-4 py-3 text-xs text-gray-400 bg-gray-50 border-t border-gray-200">
+            Showing first 200 of {filtered.length.toLocaleString()} assignments. Export to Excel for the full list.
+          </div>
+        )}
+        {filtered.length === 0 && (
+          <div className="px-4 py-8 text-center text-gray-400 text-sm">
+            No user-responsibility assignments found matching your filters.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
