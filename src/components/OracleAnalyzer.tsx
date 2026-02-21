@@ -976,20 +976,26 @@ function TabUserResponsibilities({ result }: { result: AnalysisResult }) {
     return true;
   });
 
+  // Build a lookup: appShortName -> license product name
+  const appToLicense = new Map<string, string>();
+  for (const rm of result.responsibilityModules) {
+    appToLicense.set(rm.applicationShortName, rm.licenseProduct);
+  }
+
   const exportAll = () => {
     const data = filtered;
-    const headers = ["User Name", "User ID", "Responsibility", "Application", "Application Short Name", "Active", "Last Logon Date", "User Type"];
+    const headers = ["User Name", "User ID", "Responsibility", "Application", "License Product", "Active", "Last Logon Date", "User Type"];
     const rows = data.map((ur) => [
       ur.userName,
       ur.userId,
       ur.responsibilityName,
       ur.applicationName,
-      ur.applicationShortName,
+      appToLicense.get(ur.applicationShortName) || "N/A",
       ur.isActive ? "Yes" : "No",
       ur.lastLogonDate || "Never",
       ur.isSelfService ? "Self-Service" : "Application",
     ]);
-    downloadCSV("user_responsibilities.csv", headers, rows);
+    downloadCSV("user_responsibilities_report.csv", headers, rows);
   };
 
   // Group by user for summary
@@ -1060,6 +1066,7 @@ function TabUserResponsibilities({ result }: { result: AnalysisResult }) {
               <th className="px-4 py-3">User Name</th>
               <th className="px-4 py-3">Responsibility</th>
               <th className="px-4 py-3">Application</th>
+              <th className="px-4 py-3">License Product</th>
               <th className="px-4 py-3">Active</th>
               <th className="px-4 py-3">Last Logon</th>
               <th className="px-4 py-3">Type</th>
@@ -1073,6 +1080,7 @@ function TabUserResponsibilities({ result }: { result: AnalysisResult }) {
                 <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">
                   <span className="font-mono text-xs">{ur.applicationShortName}</span>
                 </td>
+                <td className="px-4 py-2.5 text-gray-700 text-xs">{appToLicense.get(ur.applicationShortName) || "—"}</td>
                 <td className="px-4 py-2.5">
                   <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
                     ur.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
