@@ -88,63 +88,67 @@ function isLMSDataLine(line: string): boolean {
  * This mirrors the data format:
  *   #^~*~^valueA^~*~^;^~*~^valueB^~*~^;...
  *
- * We split on the '^~*~^' token (the SQL string literal version of ^~*~^)
- * to get segments, then filter out separators (;) and CHR(n) boilerplate,
- * keeping only valid column names or SQL function calls.
+ * Strategy: transform the SQL expression into a pseudo data line by "evaluating"
+ * the SQL string operations, then parse it with the exact same parseLMSDataLine
+ * function used for data rows. This guarantees that headers and data always have
+ * the same count and positional alignment.
  */
 function extractColumnsFromLMSSQL(sqlLine: string): string[] {
   // Strip outer double-quotes
-  let clean = sqlLine.trim();
-  if (clean.startsWith('"')) clean = clean.slice(1);
-  if (clean.endsWith('"')) clean = clean.slice(0, -1);
+  let pseudo = sqlLine.trim();
+  if (pseudo.startsWith('"')) pseudo = pseudo.slice(1);
+  if (pseudo.endsWith('"')) pseudo = pseudo.slice(0, -1);
 
-  // Split on '^~*~^' (the quoted token in SQL) — same idea as data lines split on ^~*~^
-  let parts = clean.split("'^~*~^'");
+  // "Evaluate" the SQL expression into what the data line would look like:
+  // 1. Replace the quoted '^~*~^' token with literal ^~*~^ (same as data)
+  pseudo = pseudo.replace(/'\^~\*~\^'/g, LMS_CARET_DELIM);
+  // 2. Replace known CHR() codes with their actual characters
+  pseudo = pseudo.replace(/CHR\s*\(\s*35\s*\)/gi, "#");    // CHR(35) → #
+  pseudo = pseudo.replace(/CHR\s*\(\s*59\s*\)/gi, ";");    // CHR(59) → ;
+  pseudo = pseudo.replace(/CHR\s*\(\s*\d+\s*\)/gi, "");    // Other CHR(n) → remove
+  // 3. Remove SQL concatenation operators
+  pseudo = pseudo.replace(/\|\|/g, "");
+  // 4. Replace quoted semicolons ';' → ; (field separator in output)
+  pseudo = pseudo.replace(/'([;])'/g, "$1");
 
-  // Fallback: if no split occurred, try unquoted ^~*~^ token
-  if (parts.length <= 1) {
-    parts = clean.split(LMS_CARET_DELIM);
-  }
+  console.log(`[extractColumnsFromLMSSQL] pseudo line (first 200): "${pseudo.substring(0, 200)}"`);
+
+  // Parse the pseudo line using the SAME function used for data lines
+  // This guarantees alignment between column positions and data value positions
+  const rawSlots = parseLMSDataLine(pseudo);
+
+  console.log(`[extractColumnsFromLMSSQL] ${rawSlots.length} raw slots: [${rawSlots.slice(0, 6).join(" | ")}]`);
+
+  // Extract clean column names from each raw slot
+  const SQL_FUNC_PREFIX = /^(?:TO_CHAR|TO_NUMBER|TO_DATE|NVL|NVL2|DECODE|UPPER|LOWER|TRIM|SUBSTR|REPLACE|ROUND|TRUNC|RTRIM|LTRIM|LPAD|RPAD|CAST|COALESCE)\s*\(\s*/i;
 
   const columns: string[] = [];
-  for (let part of parts) {
-    // Remove SQL concatenation operators, CHR(n), and surrounding junk
-    part = part
-      .replace(/\|\|/g, "")                       // remove || concat
-      .replace(/CHR\s*\(\s*\d+\s*\)/gi, "")       // remove CHR(n)
-      .replace(/^['\s;]+|['\s;]+$/g, "")           // trim quotes, spaces, semicolons
-      .trim();
+  for (let slot of rawSlots) {
+    slot = slot.trim().replace(/^['\s;]+|['\s;]+$/g, "").trim();
+    if (!slot) { columns.push(`COL_${columns.length + 1}`); continue; }
 
-    if (!part) continue;
-    // Skip pure separators/punctuation
-    if (/^[;',\s]+$/.test(part)) continue;
-
-    // Handle SQL functions, including nested calls:
-    // NVL(REPLACE(RESPONSIBILITY_NAME, CHR(10), ''), '') → RESPONSIBILITY_NAME
-    // TO_CHAR(CREATION_DATE, 'MM/DD/YYYY') → CREATION_DATE
-    const SQL_FUNC_PREFIX = /^(?:TO_CHAR|TO_NUMBER|TO_DATE|NVL|NVL2|DECODE|UPPER|LOWER|TRIM|SUBSTR|REPLACE|ROUND|TRUNC|RTRIM|LTRIM|LPAD|RPAD|CAST|COALESCE)\s*\(\s*/i;
-    if (SQL_FUNC_PREFIX.test(part)) {
-      // Strip function wrappers layer by layer
-      let stripped = part;
+    // Strip function wrappers layer by layer:
+    // NVL(REPLACE(COL, CHR(10), ''), '') → COL
+    if (SQL_FUNC_PREFIX.test(slot)) {
+      let stripped = slot;
       while (SQL_FUNC_PREFIX.test(stripped)) {
         stripped = stripped.replace(SQL_FUNC_PREFIX, "");
       }
-      // Extract the first valid column name from what remains
       const colMatch = stripped.match(/^([A-Z_][A-Z0-9_.]*)/i);
-      if (colMatch) {
-        part = colMatch[1];
-      }
+      if (colMatch) slot = colMatch[1];
     }
 
-    // Handle aliased expressions: COLUMN_NAME ALIAS or COLUMN_NAME "ALIAS"
-    const aliasMatch = part.match(/^([A-Z_][A-Z0-9_.]*)\s+(?:AS\s+)?["']?([A-Z_][A-Z0-9_]*)["']?$/i);
+    // Handle aliases: COLUMN_NAME ALIAS or COLUMN_NAME "ALIAS"
+    const aliasMatch = slot.match(/^([A-Z_][A-Z0-9_.]*)\s+(?:AS\s+)?["']?([A-Z_][A-Z0-9_]*)["']?$/i);
     if (aliasMatch) {
-      part = aliasMatch[2] || aliasMatch[1];
+      slot = aliasMatch[2] || aliasMatch[1];
     }
 
-    // Only accept valid column names (letters, digits, underscore, dot)
-    if (/^[A-Z_][A-Z0-9_.]*$/i.test(part)) {
-      columns.push(part.toUpperCase());
+    // Accept valid column names; use placeholder for unrecognized slots
+    if (/^[A-Z_][A-Z0-9_.]*$/i.test(slot)) {
+      columns.push(slot.toUpperCase());
+    } else {
+      columns.push(`COL_${columns.length + 1}`);
     }
   }
 
@@ -214,8 +218,22 @@ function parseLMSFile(text: string): ParsedCSV {
     ? extractColumnsFromLMSSQL(rawHeaderLine)
     : parseLMSDataLine(rawHeaderLine).map(h => h.toUpperCase());
 
-  console.log(`[parseLMSFile] Found ${headers.length} columns: [${headers.slice(0, 5).join(", ")}${headers.length > 5 ? " ..." : ""}]`);
-  console.log(`[parseLMSFile] Header line (first 120 chars): "${rawHeaderLine.substring(0, 120)}"`);
+  console.log(`[parseLMSFile] Found ${headers.length} columns: [${headers.slice(0, 8).join(", ")}${headers.length > 8 ? " ..." : ""}]`);
+  console.log(`[parseLMSFile] Header line (first 200 chars): "${rawHeaderLine.substring(0, 200)}"`);
+
+  // Verify alignment: compare header count with first data line value count
+  for (let i = headerIdx + 1; i < rawLines.length; i++) {
+    const checkLine = rawLines[i].trim();
+    if (!checkLine || !isLMSDataLine(checkLine)) continue;
+    const checkValues = parseLMSDataLine(checkLine);
+    if (checkValues.length > 0) {
+      console.log(`[parseLMSFile] Alignment check: ${headers.length} headers vs ${checkValues.length} data values`);
+      if (headers.length !== checkValues.length) {
+        console.warn(`[parseLMSFile] MISMATCH: ${headers.length} headers ≠ ${checkValues.length} values! First data: [${checkValues.slice(0, 5).join(", ")}]`);
+      }
+      break;
+    }
+  }
 
   const rows: Record<string, string>[] = [];
   for (let i = headerIdx + 1; i < rawLines.length; i++) {
