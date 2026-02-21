@@ -47,11 +47,28 @@ const KNOWN_ORACLE_COLUMNS = new Set([
 const LMS_CARET_DELIM = "^~*~^";
 
 /**
+ * Strip outer double-quotes from a line (some exports wrap the entire line in quotes).
+ */
+function stripOuterQuotes(line: string): string {
+  const t = line.trim();
+  if (t.length >= 2 && t[0] === '"' && t[t.length - 1] === '"') {
+    return t.slice(1, -1);
+  }
+  // Also handle case where only a leading " exists (no closing quote)
+  if (t.startsWith('"') && !t.endsWith('"')) {
+    return t.slice(1);
+  }
+  return t;
+}
+
+/**
  * Detect whether a line is an Oracle LMS SQL expression header.
  * These contain CHR(35) and '^~*~^' string literals with || concat.
+ * The line may be wrapped in outer double-quotes.
  */
 function isOracleLMSSQLHeader(line: string): boolean {
-  return /CHR\s*\(\s*35\s*\)/i.test(line) && line.includes("'^~*~^'");
+  const clean = stripOuterQuotes(line);
+  return /CHR\s*\(\s*35\s*\)/i.test(clean) && clean.includes("'^~*~^'");
 }
 
 /**
@@ -61,9 +78,12 @@ function isOracleLMSSQLHeader(line: string): boolean {
  * Output: ["APPLICATION_ID", "CREATION_DATE"]
  */
 function extractColumnsFromLMSSQL(sqlLine: string): string[] {
+  // Strip outer quotes (some exports wrap the SQL in double-quotes)
+  const clean = stripOuterQuotes(sqlLine);
+
   // Split on ||';'|| to separate field segments
   // The ';' literal is the separator between field blocks
-  const segments = sqlLine.split(/\|\|\s*';'\s*\|\|/);
+  const segments = clean.split(/\|\|\s*';'\s*\|\|/);
 
   const columns: string[] = [];
   for (const seg of segments) {
@@ -108,13 +128,18 @@ function extractColumnsFromLMSSQL(sqlLine: string): string[] {
 /**
  * Parse an Oracle LMS data line.
  * Format: #^~*~^value1^~*~^;^~*~^value2^~*~^;^~*~^value3^~*~^
+ * May also be wrapped in outer double-quotes:
+ *   "#^~*~^value1^~*~^;^~*~^value2^~*~^"
  *
  * The leading # is from CHR(35), ^~*~^ wraps each value,
  * and ; separates the field blocks.
  */
 function parseLMSDataLine(line: string): string[] {
+  // Strip outer quotes first
+  let clean = stripOuterQuotes(line);
+
   // Strip leading/trailing # (CHR(35) artifact)
-  let clean = line.replace(/^#+/, "").replace(/#+$/, "");
+  clean = clean.replace(/^#+/, "").replace(/#+$/, "");
 
   // Split on the caret delimiter
   const parts = clean.split(LMS_CARET_DELIM);
@@ -128,6 +153,7 @@ function parseLMSDataLine(line: string): string[] {
 /**
  * Check whether a data line uses ^~*~^ wrapping (LMS output format).
  * Returns true if '^~*~^' appears as a literal token in the line.
+ * Handles lines wrapped in outer double-quotes.
  */
 function isLMSDataLine(line: string): boolean {
   return line.includes(LMS_CARET_DELIM);
@@ -155,7 +181,11 @@ function isMetadataLine(line: string): boolean {
   if (t.startsWith("--")) return true;
   // Only treat '#' lines as comments if they look like actual comments,
   // NOT like LMS data (#^~*~^val^~*~^) or CHR(35) wrapped data (#val#,#val#)
-  if (t.startsWith("#") && !t.includes(LMS_CARET_DELIM) && !/#[^#]+#[,|;\t]/.test(t) && !/^#[^#]*#$/.test(t)) return true;
+  // Also handle quoted lines ("# ...")
+  const unquoted = stripOuterQuotes(t);
+  if ((t.startsWith("#") || unquoted.startsWith("#")) &&
+      !t.includes(LMS_CARET_DELIM) && !unquoted.includes(LMS_CARET_DELIM) &&
+      !/#[^#]+#[,|;\t]/.test(t) && !/^"?#[^#]*#"?$/.test(t)) return true;
   if (/^REM\s/i.test(t)) return true;
   if (/^SQL>/i.test(t)) return true;
   if (/^SET\s/i.test(t)) return true;
