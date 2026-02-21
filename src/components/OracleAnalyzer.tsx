@@ -90,24 +90,24 @@ function generatePDFReport(result: AnalysisResult) {
     ).join("");
 
     costSectionHtml =
-      '<h2>Estimated License Costs (List Price)</h2>' +
-      '<div class="summary-grid">' +
-      '<div class="summary-card"><div class="value" style="color:#1e40af">' + fmtUSD(totalLicCost) + '</div><div class="label">License Cost</div></div>' +
-      '<div class="summary-card"><div class="value" style="color:#92400e">' + fmtUSD(totalSupCost) + '</div><div class="label">Annual Support (22%)</div></div>' +
-      '<div class="summary-card"><div class="value" style="color:#16a34a">' + fmtUSD(totalLicCost + totalSupCost) + '</div><div class="label">Year 1 Total</div></div>' +
-      '<div class="summary-card"><div class="value" style="color:#7c3aed">' + fmtUSD(totalLicCost + totalSupCost * 5) + '</div><div class="label">5-Year TCO</div></div>' +
+      '<div class="sec"><div class="sn">05</div><h2>Estimated License Investment</h2></div>' +
+      '<div class="kg">' +
+      '<div class="kpi"><div class="kv" style="color:#1e3a5f">' + fmtUSD(totalLicCost) + '</div><div class="kl">License Cost (List)</div></div>' +
+      '<div class="kpi"><div class="kv" style="color:#78350f">' + fmtUSD(totalSupCost) + '</div><div class="kl">Annual Support (22%)</div></div>' +
+      '<div class="kpi"><div class="kv" style="color:#065f46">' + fmtUSD(totalLicCost + totalSupCost) + '</div><div class="kl">Year 1 Total</div></div>' +
+      '<div class="kpi"><div class="kv" style="color:#581c87">' + fmtUSD(totalLicCost + totalSupCost * 5) + '</div><div class="kl">5-Year TCO</div></div>' +
       '</div>' +
       '<table><thead><tr>' +
       '<th>License Product</th><th>Family</th>' +
-      '<th class="text-right">Users</th><th class="text-right">List Price</th>' +
-      '<th class="text-right">License Cost</th><th class="text-right">Annual Support</th>' +
+      '<th class="r">Users</th><th class="r">List Price</th>' +
+      '<th class="r">License Cost</th><th class="r">Annual Support</th>' +
       '</tr></thead><tbody>' + costRowsHtml + '</tbody>' +
-      '<tfoot><tr style="border-top:2px solid #374151;font-weight:bold">' +
-      '<td colspan="4" style="padding:8px 12px">Total</td>' +
-      '<td style="padding:8px 12px;text-align:right;color:#1e40af">' + fmtUSD(totalLicCost) + '</td>' +
-      '<td style="padding:8px 12px;text-align:right;color:#92400e">' + fmtUSD(totalSupCost) + '</td>' +
+      '<tfoot><tr style="background:#f1f5f9;font-weight:700">' +
+      '<td colspan="4">Total</td>' +
+      '<td class="r" style="color:#1e3a5f">' + fmtUSD(totalLicCost) + '</td>' +
+      '<td class="r" style="color:#78350f">' + fmtUSD(totalSupCost) + '</td>' +
       '</tr></tfoot></table>' +
-      '<p style="font-size:10px;color:#6b7280;margin-top:8px">* List prices from Oracle EBS Global Price List. Actual prices vary with negotiated discounts (30-60% typical). Annual support = 22% of net license fee.</p>';
+      '<p class="fn">* Oracle EBS Global Price List (USD). Actual prices subject to negotiated discounts (30-60% typical). Annual support = 22% of net license fees.</p>';
   }
 
   const productRows = allProducts.map((ls) =>
@@ -135,95 +135,111 @@ function generatePDFReport(result: AnalysisResult) {
 
   const warningItems = result.warnings.map((w) => `<li style="margin-bottom:4px">${w}</li>`).join("");
 
-  win.document.write(`<!DOCTYPE html>
-<html><head><title>Oracle EBS License Analysis Report</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; color: #1a1a1a; font-size: 12px; }
-  h1 { font-size: 22px; color: #1e40af; margin-bottom: 4px; }
-  h2 { font-size: 16px; color: #374151; margin-top: 32px; margin-bottom: 12px; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; }
-  .subtitle { color: #6b7280; font-size: 12px; margin-bottom: 24px; }
-  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
-  .summary-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; }
-  .summary-card .value { font-size: 28px; font-weight: bold; }
-  .summary-card .label { font-size: 11px; color: #6b7280; margin-top: 4px; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-  th { padding: 8px 12px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; border-bottom: 2px solid #e5e7eb; }
-  .text-right { text-align: right; }
-  .warnings { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; }
-  .warnings li { font-size: 12px; color: #92400e; }
-  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 10px; text-align: center; }
-  @media print { body { margin: 20px; } }
-</style>
-</head><body>
-<h1>Oracle EBS License Analysis Report</h1>
-<p class="subtitle">Generated: ${new Date().toLocaleString()} | Files analyzed: ${result.loadedFiles.length} | Modules installed: ${result.counts.installedModules}</p>
+  const reportDate = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const execCost = totalLicCost > 0 ? " Estimated license exposure at list prices is <strong>" + fmtUSD(totalLicCost) + "</strong> with <strong>" + fmtUSD(totalSupCost) + "</strong>/yr support." : "";
+  const execUnused = result.unusedModules.length > 0 ? " " + result.unusedModules.length + " module(s) have no active users — optimization opportunity." : "";
 
-<div class="summary-grid">
-  <div class="summary-card">
-    <div class="value" style="color:#1e40af">${result.counts.licensedProducts}</div>
-    <div class="label">Licensed Products</div>
-  </div>
-  <div class="summary-card">
-    <div class="value" style="color:#2563eb">${result.counts.installedModules}</div>
-    <div class="label">Installed Modules</div>
-  </div>
-  <div class="summary-card">
-    <div class="value" style="color:#16a34a">${result.counts.totalAppUsers.toLocaleString()}</div>
-    <div class="label">Application Users</div>
-  </div>
-  <div class="summary-card">
-    <div class="value" style="color:#7c3aed">${result.counts.totalSelfServiceUsers.toLocaleString()}</div>
-    <div class="label">Self-Service Users</div>
-  </div>
+  win.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Oracle EBS License Analysis — Redress Compliance</title>
+<style>
+@page{size:A4;margin:15mm 20mm}*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,Segoe UI,-apple-system,sans-serif;color:#1e293b;font-size:11px;line-height:1.5}
+.cover{background:linear-gradient(135deg,#0f172a,#1e3a5f,#0c4a6e);color:#fff;padding:48px 40px 40px;margin:-15mm -20mm 0}
+.cb{font-size:13px;letter-spacing:3px;text-transform:uppercase;color:#93c5fd;font-weight:600;margin-bottom:6px}
+.cover h1{font-size:28px;font-weight:800;letter-spacing:-.5px;margin-bottom:8px;line-height:1.2}
+.cs{font-size:13px;color:#bfdbfe;line-height:1.6}
+.cm{margin-top:24px;display:flex;gap:24px;font-size:11px;color:#93c5fd;flex-wrap:wrap}
+.cnt{padding:32px 40px;margin:0 -20mm}
+.es{background:#f0f9ff;border-left:4px solid #0284c7;padding:20px 24px;margin-bottom:32px;border-radius:0 8px 8px 0}
+.es h3{font-size:14px;font-weight:700;color:#0c4a6e;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px}
+.es p{font-size:12px;color:#334155;line-height:1.7}
+.sec{display:flex;align-items:center;gap:12px;margin-top:36px;margin-bottom:16px;border-bottom:2px solid #e2e8f0;padding-bottom:8px;page-break-after:avoid}
+.sn{background:#0f172a;color:#fff;font-size:10px;font-weight:700;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sec h2{font-size:15px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:.5px}
+.kg{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.kpi{border:1px solid #e2e8f0;border-radius:8px;padding:16px;text-align:center;background:#fafbfc}
+.kv{font-size:22px;font-weight:800;letter-spacing:-.5px}
+.kl{font-size:10px;color:#64748b;margin-top:4px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+table{width:100%;border-collapse:collapse;margin-bottom:20px;border:1px solid #e2e8f0;font-size:10.5px}
+thead{background:#0f172a;color:#fff}
+th{padding:10px 12px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.8px;font-weight:600}
+td{padding:8px 12px;border-bottom:1px solid #f1f5f9}
+.r{text-align:right}
+tfoot td{border-top:2px solid #cbd5e1}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:600}
+.bap{background:#dbeafe;color:#1e40af}.bss{background:#f3e8ff;color:#6b21a8}
+.chip{display:inline-block;background:#fef3c7;border:1px solid #fbbf24;color:#92400e;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:500;margin:3px 4px 3px 0}
+.wb{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px 20px}
+.wb h4{color:#92400e;font-size:12px;font-weight:700;margin-bottom:8px}
+.wb li{font-size:11px;color:#78350f;margin-bottom:4px;line-height:1.5}
+.fn{font-size:9px;color:#94a3b8;margin-top:8px;font-style:italic}
+.pf{margin-top:48px;padding-top:20px;border-top:2px solid #0f172a;display:flex;justify-content:space-between;align-items:center}
+.pfl{font-size:10px;color:#64748b}.pfb{font-size:11px;font-weight:700;color:#0f172a;letter-spacing:1px;text-transform:uppercase}
+.conf{display:inline-block;background:#fef2f2;color:#991b1b;padding:2px 8px;border-radius:4px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+@media print{.cover{margin:-15mm -20mm 0}.cnt{margin:0 -20mm}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style></head><body>
+<div class="cover">
+<div class="cb">Redress Compliance</div>
+<h1>Oracle E-Business Suite<br>License Analysis Report</h1>
+<div class="cs">Independent license position assessment based on Oracle LMS collection data analysis.</div>
+<div class="cm">
+<span>Report Date: ${reportDate}</span>
+<span>Files: ${result.loadedFiles.length}</span>
+<span>Modules: ${result.counts.installedModules}</span>
+<span>${result.userStats.activeUsers.toLocaleString()} Active Users</span>
+</div>
+</div>
+<div class="cnt">
+<div class="es"><h3>Executive Summary</h3>
+<p>Analysis identifies <strong>${licensedProducts.length} licensed products</strong> across <strong>${result.counts.families} families</strong>. <strong>${result.counts.totalAppUsers.toLocaleString()} Application Users</strong> and <strong>${result.counts.totalSelfServiceUsers.toLocaleString()} Self-Service Users</strong> are deployed.${execUnused}${execCost}</p>
+</div>
+<div class="sec"><div class="sn">01</div><h2>Deployment Overview</h2></div>
+<div class="kg">
+<div class="kpi"><div class="kv" style="color:#1e3a5f">${result.counts.licensedProducts}</div><div class="kl">Licensed Products</div></div>
+<div class="kpi"><div class="kv" style="color:#0c4a6e">${result.counts.installedModules}</div><div class="kl">Installed Modules</div></div>
+<div class="kpi"><div class="kv" style="color:#065f46">${result.counts.totalAppUsers.toLocaleString()}</div><div class="kl">Application Users</div></div>
+<div class="kpi"><div class="kv" style="color:#581c87">${result.counts.totalSelfServiceUsers.toLocaleString()}</div><div class="kl">Self-Service Users</div></div>
 </div>
 
-<h2>License Requirements (${licensedProducts.length} active of ${allProducts.length} total)</h2>
+<div class="sec"><div class="sn">02</div><h2>License Requirements</h2></div>
 <table>
-  <thead><tr>
-    <th>License Product</th><th>Family</th><th>Metric</th>
-    <th class="text-right">App Users</th><th class="text-right">SS Users</th><th class="text-right">Total Active</th>
-  </tr></thead>
-  <tbody>${productRows}</tbody>
+<thead><tr><th>License Product</th><th>Family</th><th>Metric</th><th class="r">App Users</th><th class="r">SS Users</th><th class="r">Total Active</th></tr></thead>
+<tbody>${productRows}</tbody>
 </table>
 
-<h2>Installed Modules with Active Users</h2>
+<div class="sec"><div class="sn">03</div><h2>Installed Modules</h2></div>
 <table>
-  <thead><tr>
-    <th>Module</th><th>License Product</th>
-    <th class="text-right">Active Users</th><th class="text-right">App Users</th><th class="text-right">SS Users</th>
-  </tr></thead>
-  <tbody>${moduleRows}</tbody>
+<thead><tr><th>Module</th><th>License Product</th><th class="r">Active</th><th class="r">App</th><th class="r">SS</th></tr></thead>
+<tbody>${moduleRows}</tbody>
 </table>
 
-<h2>User Statistics</h2>
-<table>
-  <tbody>
-    <tr><td style="padding:6px 12px;border-bottom:1px solid #eee">Total Users (FND_USER)</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:bold">${result.userStats.totalUsers.toLocaleString()}</td></tr>
-    <tr><td style="padding:6px 12px;border-bottom:1px solid #eee">Active Users</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;color:#16a34a">${result.userStats.activeUsers.toLocaleString()}</td></tr>
-    <tr><td style="padding:6px 12px;border-bottom:1px solid #eee">Inactive / End-Dated</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${result.userStats.inactiveUsers.toLocaleString()}</td></tr>
-    <tr><td style="padding:6px 12px;border-bottom:1px solid #eee">Users with Responsibilities</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${result.userStats.usersWithResponsibilities.toLocaleString()}</td></tr>
-    <tr><td style="padding:6px 12px;border-bottom:1px solid #eee">Users with Login History</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">${result.userStats.usersWithLogins.toLocaleString()}</td></tr>
-  </tbody>
-</table>
-
-${result.warnings.length > 0 ? `
-<h2>Findings & Warnings</h2>
-<div class="warnings"><ul style="margin:0;padding-left:20px">${warningItems}</ul></div>
-` : ""}
-
-${result.unusedModules.length > 0 ? `
-<h2>Optimization Opportunities</h2>
-<p style="color:#92400e;font-size:12px">${result.unusedModules.length} module(s) are installed but have no assigned users:</p>
-<p style="font-size:12px">${result.unusedModules.map((m) => m.licenseProduct?.productName || m.displayName).join(", ")}</p>
-` : ""}
+<div class="sec"><div class="sn">04</div><h2>User Population</h2></div>
+<div class="kg">
+<div class="kpi"><div class="kv" style="color:#1e3a5f">${result.userStats.totalUsers.toLocaleString()}</div><div class="kl">Total Users</div></div>
+<div class="kpi"><div class="kv" style="color:#065f46">${result.userStats.activeUsers.toLocaleString()}</div><div class="kl">Active</div></div>
+<div class="kpi"><div class="kv" style="color:#78350f">${result.userStats.inactiveUsers.toLocaleString()}</div><div class="kl">Inactive</div></div>
+<div class="kpi"><div class="kv" style="color:#0c4a6e">${result.userStats.usersWithLogins.toLocaleString()}</div><div class="kl">With Logins</div></div>
+</div>
 
 ${costSectionHtml}
 
-<div class="footer">
-  Oracle EBS License Analysis Report — Generated by SoftwiseAI Oracle Analyzer<br>
-  All data processed locally in browser. No data was uploaded or transmitted.
+${result.warnings.length > 0 ? `
+<div class="sec"><div class="sn">06</div><h2>Findings &amp; Observations</h2></div>
+<div class="wb"><h4>Key Findings (${result.warnings.length})</h4><ul style="padding-left:18px">${warningItems}</ul></div>
+` : ""}
+
+${result.unusedModules.length > 0 ? `
+<div class="sec"><div class="sn">07</div><h2>Optimization Opportunities</h2></div>
+<p style="font-size:11px;color:#475569;margin-bottom:10px">${result.unusedModules.length} module(s) installed with no active users — potential for license harvesting.</p>
+<div>${result.unusedModules.map((m) => '<span class="chip">' + (m.licenseProduct?.productName || m.displayName) + '</span>').join("")}</div>
+` : ""}
+
+<div style="margin-top:36px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px">
+<h4 style="font-size:11px;font-weight:700;color:#334155;margin-bottom:6px">Disclaimer</h4>
+<p style="font-size:9.5px;color:#64748b;line-height:1.6">This report is based on Oracle LMS collection data for license management planning. Cost estimates use Oracle list prices and do not account for contractual discounts or bundle pricing. This does not constitute legal or contractual advice. Redress Compliance recommends engaging Oracle directly for formal compliance verification.</p>
 </div>
-</body></html>`);
+<div class="pf"><div class="pfl">${reportDate} &middot; <span class="conf">Confidential</span></div><div class="pfb">Redress Compliance</div></div>
+</div></body></html>`);
   win.document.close();
   // Auto-trigger print dialog after a short delay
   setTimeout(() => win.print(), 500);
