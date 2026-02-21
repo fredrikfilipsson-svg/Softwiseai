@@ -62,6 +62,18 @@ export interface UserResponsibilityDetail {
   isSelfService: boolean;
 }
 
+export interface ResponsibilityModuleInfo {
+  responsibilityName: string;
+  responsibilityKey: string;
+  applicationId: string;
+  applicationShortName: string;
+  applicationName: string;
+  licenseProduct: string;
+  licenseFamily: string;
+  userCount: number;
+  activeUserCount: number;
+}
+
 export interface UserInfo {
   userId: string;
   userName: string;
@@ -107,6 +119,8 @@ export interface AnalysisResult {
   };
   /** User-responsibility detail report */
   userResponsibilities: UserResponsibilityDetail[];
+  /** Responsibility-to-module mapping */
+  responsibilityModules: ResponsibilityModuleInfo[];
   /** Warnings & findings */
   warnings: string[];
   /** Summary counts */
@@ -216,6 +230,7 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
       unusedModules: [],
       licenseSummary: [],
       userResponsibilities: [],
+      responsibilityModules: [],
       userStats: { totalUsers: 0, activeUsers: 0, inactiveUsers: 0, usersWithResponsibilities: 0, usersWithLogins: 0 },
       warnings: ["Critical files missing: " + missingFiles.join(", ") + ". Cannot perform analysis."],
       counts: { installedModules: 0, licensedProducts: 0, families: 0, totalAppUsers: 0, totalSelfServiceUsers: 0 },
@@ -573,6 +588,48 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
 
   console.log(`[Analysis] User responsibilities: ${userResponsibilities.length} user-resp assignments`);
 
+  // ── 7c. Build responsibility-to-module mapping ─────────────
+  const responsibilityModules: ResponsibilityModuleInfo[] = [];
+
+  for (const [, resp] of respMap.entries()) {
+    if (!resp.isActive) continue;
+    const appInfo = appMap.get(resp.applicationId);
+    if (!appInfo) continue;
+
+    const licProduct = ORACLE_LICENSE_MAP[appInfo.shortName] || null;
+    if (!licProduct || licProduct.isBase) continue;
+
+    // Count users assigned to this specific responsibility
+    const respKey = `${resp.applicationId}_${resp.responsibilityId}`;
+    let userCount = 0;
+    let activeUserCount = 0;
+    for (const [userId, userResps] of userRespAssignments.entries()) {
+      if (userResps.has(respKey)) {
+        userCount++;
+        const user = userMap.get(userId);
+        if (user?.isActive) activeUserCount++;
+      }
+    }
+
+    responsibilityModules.push({
+      responsibilityName: resp.displayName,
+      responsibilityKey: resp.responsibilityKey,
+      applicationId: resp.applicationId,
+      applicationShortName: appInfo.shortName,
+      applicationName: appInfo.displayName,
+      licenseProduct: licProduct.productName,
+      licenseFamily: licProduct.family,
+      userCount,
+      activeUserCount,
+    });
+  }
+
+  responsibilityModules.sort((a, b) =>
+    a.responsibilityName.localeCompare(b.responsibilityName)
+  );
+
+  console.log(`[Analysis] Responsibility-module mapping: ${responsibilityModules.length} entries`);
+
   // Sort: licensed products first, then by user count descending
   installedModules.sort((a, b) => {
     if (a.licenseProduct?.isBase && !b.licenseProduct?.isBase) return 1;
@@ -658,6 +715,7 @@ export function analyzeOracleEBS(tables: LoadedTables): AnalysisResult {
     unusedModules: unusedModules.filter((m) => !m.licenseProduct?.isBase),
     licenseSummary,
     userResponsibilities,
+    responsibilityModules,
     userStats: {
       totalUsers,
       activeUsers,

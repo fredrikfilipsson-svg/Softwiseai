@@ -30,7 +30,7 @@ export interface ComplianceRow {
   status: "compliant" | "under-licensed" | "over-licensed" | "not-deployed" | "not-owned";
 }
 
-type Tab = "summary" | "licenses" | "modules" | "users" | "responsibilities" | "warnings" | "compliance";
+type Tab = "summary" | "licenses" | "modules" | "users" | "responsibilities" | "resp-mapping" | "warnings" | "compliance";
 
 /** Generate a CSV string from headers and rows, then trigger a browser download */
 function downloadCSV(filename: string, headers: string[], rows: string[][]) {
@@ -352,6 +352,7 @@ export default function OracleAnalyzer() {
                 { key: "compliance", label: "Compliance" },
                 { key: "modules", label: "Installed Modules" },
                 { key: "responsibilities", label: "User Responsibilities" },
+                { key: "resp-mapping", label: "Resp → License" },
                 { key: "users", label: "User Statistics" },
                 { key: "warnings", label: `Findings (${result.warnings.length})` },
               ] as { key: Tab; label: string }[]).map((tab) => (
@@ -388,6 +389,7 @@ export default function OracleAnalyzer() {
             />
           )}
           {activeTab === "responsibilities" && <TabUserResponsibilities result={result} />}
+          {activeTab === "resp-mapping" && <TabRespMapping result={result} />}
           {activeTab === "users" && <TabUsers result={result} />}
           {activeTab === "warnings" && <TabWarnings result={result} />}
         </div>
@@ -821,6 +823,142 @@ function TabModules({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function TabRespMapping({ result }: { result: AnalysisResult }) {
+  const [filterResp, setFilterResp] = useState("");
+  const [filterProduct, setFilterProduct] = useState("");
+
+  const filtered = result.responsibilityModules.filter((rm) => {
+    if (filterResp && !rm.responsibilityName.toLowerCase().includes(filterResp.toLowerCase())) return false;
+    if (filterProduct && !rm.licenseProduct.toLowerCase().includes(filterProduct.toLowerCase()) &&
+        !rm.licenseFamily.toLowerCase().includes(filterProduct.toLowerCase())) return false;
+    return true;
+  });
+
+  // Group by license product for summary view
+  const byProduct = new Map<string, { family: string; resps: typeof filtered }>();
+  for (const rm of filtered) {
+    if (!byProduct.has(rm.licenseProduct)) {
+      byProduct.set(rm.licenseProduct, { family: rm.licenseFamily, resps: [] });
+    }
+    byProduct.get(rm.licenseProduct)!.resps.push(rm);
+  }
+
+  const exportMapping = () => {
+    const headers = ["Responsibility", "Responsibility Key", "Application", "License Product", "License Family", "Users", "Active Users"];
+    const rows = filtered.map((rm) => [
+      rm.responsibilityName,
+      rm.responsibilityKey,
+      rm.applicationShortName,
+      rm.licenseProduct,
+      rm.licenseFamily,
+      String(rm.userCount),
+      String(rm.activeUserCount),
+    ]);
+    downloadCSV("responsibility_license_mapping.csv", headers, rows);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Summary + Export */}
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-gray-600">
+          <span className="font-semibold">{filtered.length}</span> responsibilities across{" "}
+          <span className="font-semibold">{byProduct.size}</span> license products
+        </div>
+        <button
+          onClick={exportMapping}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          Export to Excel
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="card !py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex-1 min-w-[200px]">
+            <input
+              type="text"
+              value={filterResp}
+              onChange={(e) => setFilterResp(e.target.value)}
+              placeholder="Filter by responsibility name..."
+              className="input-field text-sm"
+            />
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <input
+              type="text"
+              value={filterProduct}
+              onChange={(e) => setFilterProduct(e.target.value)}
+              placeholder="Filter by license product or family..."
+              className="input-field text-sm"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Grouped by License Product */}
+      {Array.from(byProduct.entries()).map(([product, { family, resps }]) => (
+        <div key={product} className="card">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-brand-500" />
+                {product}
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">{family}</p>
+            </div>
+            <span className="rounded-full bg-brand-100 text-brand-700 px-2.5 py-0.5 text-xs font-medium">
+              {resps.length} {resps.length === 1 ? "responsibility" : "responsibilities"}
+            </span>
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-100 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                  <th className="px-3 py-2">Responsibility</th>
+                  <th className="px-3 py-2">Application</th>
+                  <th className="px-3 py-2 text-right">Users</th>
+                  <th className="px-3 py-2 text-right">Active</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {resps.map((rm, i) => (
+                  <tr key={i} className="hover:bg-gray-50/50">
+                    <td className="px-3 py-1.5 text-gray-900">{rm.responsibilityName}</td>
+                    <td className="px-3 py-1.5 text-gray-500 font-mono">{rm.applicationShortName}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-600">{rm.userCount.toLocaleString()}</td>
+                    <td className="px-3 py-1.5 text-right font-medium text-green-700">{rm.activeUserCount.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+
+      {filtered.length === 0 && (
+        <div className="card text-center py-8">
+          <p className="text-gray-400">No responsibilities found matching your filters.</p>
+        </div>
+      )}
+
+      <div className="card border-blue-200 bg-blue-50/50">
+        <h4 className="text-sm font-semibold text-blue-800 mb-2">Understanding This View</h4>
+        <ul className="text-xs text-blue-700 space-y-1 list-disc list-inside">
+          <li>Each responsibility is linked to an Oracle application (module).</li>
+          <li>The license product is determined by which application owns the responsibility.</li>
+          <li>A user with a given responsibility triggers the license requirement for the associated product.</li>
+          <li>Use this to understand exactly which responsibilities drive which license costs.</li>
+        </ul>
+      </div>
     </div>
   );
 }
