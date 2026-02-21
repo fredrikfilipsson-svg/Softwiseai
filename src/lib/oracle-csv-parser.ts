@@ -82,8 +82,15 @@ function isLMSDataLine(line: string): boolean {
 /**
  * Extract column names from an Oracle LMS SQL SELECT expression.
  *
- * Input:  CHR(35)||'^~*~^'||APPLICATION_ID||'^~*~^'||';'||'^~*~^'||TO_CHAR(CREATION_DATE,'MM/DD/YYYY')||'^~*~^'
- * Output: ["APPLICATION_ID", "CREATION_DATE"]
+ * The SQL structure is:
+ *   CHR(35)||'^~*~^'||COLUMN_A||'^~*~^'||';'||'^~*~^'||COLUMN_B||'^~*~^'||';'||...
+ *
+ * This mirrors the data format:
+ *   #^~*~^valueA^~*~^;^~*~^valueB^~*~^;...
+ *
+ * We split on the '^~*~^' token (the SQL string literal version of ^~*~^)
+ * to get segments, then filter out separators (;) and CHR(n) boilerplate,
+ * keeping only valid column names or SQL function calls.
  */
 function extractColumnsFromLMSSQL(sqlLine: string): string[] {
   // Strip outer double-quotes
@@ -91,41 +98,44 @@ function extractColumnsFromLMSSQL(sqlLine: string): string[] {
   if (clean.startsWith('"')) clean = clean.slice(1);
   if (clean.endsWith('"')) clean = clean.slice(0, -1);
 
-  // Split on ||';'|| or ||;|| to separate field segments
-  const segments = clean.split(/\|\|\s*'?;'?\s*\|\|/);
+  // Split on '^~*~^' (the quoted token in SQL) — same idea as data lines split on ^~*~^
+  let parts = clean.split("'^~*~^'");
+
+  // Fallback: if no split occurred, try unquoted ^~*~^ token
+  if (parts.length <= 1) {
+    parts = clean.split(LMS_CARET_DELIM);
+  }
 
   const columns: string[] = [];
-  for (const seg of segments) {
-    // Remove SQL boilerplate piece by piece
-    let col = seg
-      .replace(/CHR\s*\(\s*\d+\s*\)\s*\|\|/gi, "")   // CHR(n)||
-      .replace(/\|\|\s*CHR\s*\(\s*\d+\s*\)/gi, "")     // ||CHR(n)
-      .replace(/CHR\s*\(\s*\d+\s*\)/gi, "")             // standalone CHR(n)
-      .replace(/'\^~\*~\^'\s*\|\|/g, "")                 // '^~*~^'||
-      .replace(/\|\|\s*'\^~\*~\^'/g, "")                 // ||'^~*~^'
-      .replace(/'\^~\*~\^'/g, "")                         // standalone '^~*~^'
-      .replace(/^\|+|\|+$/g, "")                          // leading/trailing pipes
+  for (let part of parts) {
+    // Remove SQL concatenation operators, CHR(n), and surrounding junk
+    part = part
+      .replace(/\|\|/g, "")                       // remove || concat
+      .replace(/CHR\s*\(\s*\d+\s*\)/gi, "")       // remove CHR(n)
+      .replace(/^['\s;]+|['\s;]+$/g, "")           // trim quotes, spaces, semicolons
       .trim();
 
-    if (!col) continue;
+    if (!part) continue;
+    // Skip pure separators/punctuation
+    if (/^[;',\s]+$/.test(part)) continue;
 
     // Handle SQL functions: TO_CHAR(COL, 'FMT'), NVL(COL, 'default'), etc.
-    const funcMatch = col.match(
+    const funcMatch = part.match(
       /^(?:TO_CHAR|TO_NUMBER|TO_DATE|NVL|NVL2|DECODE|UPPER|LOWER|TRIM|SUBSTR|REPLACE|ROUND|TRUNC)\s*\(\s*([A-Z_][A-Z0-9_.]*)/i
     );
     if (funcMatch) {
-      col = funcMatch[1];
+      part = funcMatch[1];
     }
 
     // Handle aliased expressions: COLUMN_NAME ALIAS or COLUMN_NAME "ALIAS"
-    const aliasMatch = col.match(/^([A-Z_][A-Z0-9_.]*)\s+(?:AS\s+)?["']?([A-Z_][A-Z0-9_]*)["']?$/i);
+    const aliasMatch = part.match(/^([A-Z_][A-Z0-9_.]*)\s+(?:AS\s+)?["']?([A-Z_][A-Z0-9_]*)["']?$/i);
     if (aliasMatch) {
-      col = aliasMatch[2] || aliasMatch[1];
+      part = aliasMatch[2] || aliasMatch[1];
     }
 
-    // Only accept valid column names
-    if (/^[A-Z_][A-Z0-9_.]*$/i.test(col)) {
-      columns.push(col.toUpperCase());
+    // Only accept valid column names (letters, digits, underscore, dot)
+    if (/^[A-Z_][A-Z0-9_.]*$/i.test(part)) {
+      columns.push(part.toUpperCase());
     }
   }
 
