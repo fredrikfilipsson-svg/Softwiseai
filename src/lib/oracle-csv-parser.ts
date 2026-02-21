@@ -108,8 +108,8 @@ function extractColumnsFromLMSSQL(sqlLine: string): string[] {
   pseudo = pseudo.replace(/CHR\s*\(\s*\d+\s*\)/gi, "");    // Other CHR(n) → remove
   // 3. Remove SQL concatenation operators
   pseudo = pseudo.replace(/\|\|/g, "");
-  // 4. Replace quoted semicolons ';' → ; (field separator in output)
-  pseudo = pseudo.replace(/'([;])'/g, "$1");
+  // 4. Replace quoted separators: ';' → ; and ',' → , (field separators in output)
+  pseudo = pseudo.replace(/'([;,])'/g, "$1");
 
   console.log(`[extractColumnsFromLMSSQL] pseudo line (first 200): "${pseudo.substring(0, 200)}"`);
 
@@ -171,10 +171,10 @@ function parseLMSDataLine(line: string): string[] {
   // Split on the caret delimiter
   const parts = clean.split(LMS_CARET_DELIM);
 
-  // Filter out empty segments and the ';' separators between fields
+  // Filter out empty segments and field separators (';' or ',' between fields)
   return parts
     .map((p) => p.trim())
-    .filter((p) => p !== "" && p !== ";");
+    .filter((p) => p !== "" && p !== ";" && p !== ",");
 }
 
 /**
