@@ -33,55 +33,119 @@ const KNOWN_ORACLE_COLUMNS = new Set([
   "END_DATE_ACTIVE", "CREATION_DATE", "LAST_UPDATE_DATE", "CREATED_BY",
 ]);
 
-// ─── Oracle LMS special tokens ─────────────────────────────────
-// Oracle LMS collection scripts often wrap fields with ^~*~^ as a
-// delimiter, or use CHR(35) (the '#' character) as a field wrapper
-// via SQL concatenation: CHR(35)||COLUMN_NAME||CHR(35)
+// ─── Oracle LMS SQL spool format ────────────────────────────────
+//
+// Oracle LMS collection scripts generate CSV files where:
+//   HEADER = the raw SQL SELECT expression, e.g.:
+//     CHR(35)||'^~*~^'||APPLICATION_ID||'^~*~^'||';'||'^~*~^'||APPLICATION_SHORT_NAME||'^~*~^'||...
+//   DATA   = evaluated output, e.g.:
+//     #^~*~^200^~*~^;^~*~^GL^~*~^;^~*~^General Ledger^~*~^
+//
+// We detect this format and parse it with dedicated logic.
 
-/** The Oracle LMS "caret" delimiter used in many collection scripts */
+/** The Oracle LMS "caret" delimiter token */
 const LMS_CARET_DELIM = "^~*~^";
 
 /**
- * Clean Oracle SQL artifacts from a raw line.
- * Handles:
- *   - CHR(n)||  and  ||CHR(n)  concatenation expressions
- *   - Literal ^~*~^ tokens when NOT used as the delimiter
- *   - '#' wrappers around values (since CHR(35) = '#')
+ * Detect whether a line is an Oracle LMS SQL expression header.
+ * These contain CHR(35) and '^~*~^' string literals with || concat.
+ */
+function isOracleLMSSQLHeader(line: string): boolean {
+  return /CHR\s*\(\s*35\s*\)/i.test(line) && line.includes("'^~*~^'");
+}
+
+/**
+ * Extract column names from an Oracle LMS SQL SELECT expression.
+ *
+ * Input:  CHR(35)||'^~*~^'||APPLICATION_ID||'^~*~^'||';'||'^~*~^'||TO_CHAR(CREATION_DATE,'MM/DD/YYYY HH:MI:SS AM')||'^~*~^'
+ * Output: ["APPLICATION_ID", "CREATION_DATE"]
+ */
+function extractColumnsFromLMSSQL(sqlLine: string): string[] {
+  // Split on ||';'|| to separate field segments
+  // The ';' literal is the separator between field blocks
+  const segments = sqlLine.split(/\|\|\s*';'\s*\|\|/);
+
+  const columns: string[] = [];
+  for (const seg of segments) {
+    // Remove SQL boilerplate piece by piece
+    let col = seg
+      .replace(/CHR\s*\(\s*\d+\s*\)\s*\|\|/gi, "")   // CHR(n)||
+      .replace(/\|\|\s*CHR\s*\(\s*\d+\s*\)/gi, "")     // ||CHR(n)
+      .replace(/CHR\s*\(\s*\d+\s*\)/gi, "")             // standalone CHR(n)
+      .replace(/'\^~\*~\^'\s*\|\|/g, "")                 // '^~*~^'||
+      .replace(/\|\|\s*'\^~\*~\^'/g, "")                 // ||'^~*~^'
+      .replace(/'\^~\*~\^'/g, "")                         // standalone '^~*~^'
+      .replace(/^\|+|\|+$/g, "")                          // leading/trailing pipes
+      .trim();
+
+    if (!col) continue;
+
+    // Handle SQL functions: TO_CHAR(COL, 'FMT'), NVL(COL, 'default'), etc.
+    // Extract the first column-name argument
+    const funcMatch = col.match(
+      /^(?:TO_CHAR|TO_NUMBER|TO_DATE|NVL|NVL2|DECODE|UPPER|LOWER|TRIM|SUBSTR|REPLACE|ROUND|TRUNC)\s*\(\s*([A-Z_][A-Z0-9_.]*)/i
+    );
+    if (funcMatch) {
+      col = funcMatch[1];
+    }
+
+    // Handle aliased expressions: COLUMN_NAME ALIAS or COLUMN_NAME "ALIAS"
+    const aliasMatch = col.match(/^([A-Z_][A-Z0-9_.]*)\s+(?:AS\s+)?["']?([A-Z_][A-Z0-9_]*)["']?$/i);
+    if (aliasMatch) {
+      // Prefer the alias if present
+      col = aliasMatch[2] || aliasMatch[1];
+    }
+
+    // Only accept valid column names (letters, digits, underscore)
+    if (/^[A-Z_][A-Z0-9_.]*$/i.test(col)) {
+      columns.push(col.toUpperCase());
+    }
+  }
+
+  return columns;
+}
+
+/**
+ * Parse an Oracle LMS data line.
+ * Format: #^~*~^value1^~*~^;^~*~^value2^~*~^;^~*~^value3^~*~^
+ *
+ * The leading # is from CHR(35), ^~*~^ wraps each value,
+ * and ; separates the field blocks.
+ */
+function parseLMSDataLine(line: string): string[] {
+  // Strip leading/trailing # (CHR(35) artifact)
+  let clean = line.replace(/^#+/, "").replace(/#+$/, "");
+
+  // Split on the caret delimiter
+  const parts = clean.split(LMS_CARET_DELIM);
+
+  // Filter out empty segments and the ';' separators between fields
+  return parts
+    .map((p) => p.trim())
+    .filter((p) => p !== "" && p !== ";");
+}
+
+/**
+ * Check whether a data line uses ^~*~^ wrapping (LMS output format).
+ * Returns true if '^~*~^' appears as a literal token in the line.
+ */
+function isLMSDataLine(line: string): boolean {
+  return line.includes(LMS_CARET_DELIM);
+}
+
+/**
+ * Clean Oracle SQL artifacts from a raw value/header.
+ * Used as a fallback for non-LMS files that still have some SQL residue.
  */
 function cleanOracleSQL(value: string): string {
   let v = value;
-  // Strip CHR(n)|| and ||CHR(n) — Oracle SQL concat expressions
   v = v.replace(/CHR\(\d+\)\s*\|\|/gi, "");
   v = v.replace(/\|\|\s*CHR\(\d+\)/gi, "");
-  // Strip remaining standalone CHR(n) calls
   v = v.replace(/CHR\(\d+\)/gi, "");
-  // Strip surrounding '#' left over from CHR(35) wrappers
+  v = v.replace(/\^~\*~\^/g, "");
   v = v.replace(/^#+|#+$/g, "");
-  // Strip surrounding single-quotes left from SQL string literals
   v = v.replace(/^'+|'+$/g, "");
   return v.trim();
-}
-
-/**
- * Check whether a line uses ^~*~^ as the field delimiter.
- * Returns true if the token appears at least twice (start/end or between fields).
- */
-function isCaretDelimited(line: string): boolean {
-  const count = line.split(LMS_CARET_DELIM).length - 1;
-  return count >= 2;
-}
-
-/**
- * Parse a ^~*~^ delimited line into field values.
- * Example: ^~*~^FOO^~*~^BAR^~*~^  → ["FOO", "BAR"]
- */
-function parseCaretLine(line: string): string[] {
-  // Split on the caret delimiter
-  const parts = line.split(LMS_CARET_DELIM);
-  // Filter out empty leading/trailing segments caused by wrapping carets
-  return parts
-    .map((p) => p.trim())
-    .filter((p) => p !== "");
 }
 
 /** Lines that are metadata / comments — not data */
@@ -90,8 +154,8 @@ function isMetadataLine(line: string): boolean {
   if (t === "") return true;
   if (t.startsWith("--")) return true;
   // Only treat '#' lines as comments if they look like actual comments,
-  // NOT like #VALUE#,#VALUE# (CHR(35) wrapped data)
-  if (t.startsWith("#") && !/#[^#]+#[,|;\t]/.test(t) && !/^#[^#]*#$/.test(t)) return true;
+  // NOT like LMS data (#^~*~^val^~*~^) or CHR(35) wrapped data (#val#,#val#)
+  if (t.startsWith("#") && !t.includes(LMS_CARET_DELIM) && !/#[^#]+#[,|;\t]/.test(t) && !/^#[^#]*#$/.test(t)) return true;
   if (/^REM\s/i.test(t)) return true;
   if (/^SQL>/i.test(t)) return true;
   if (/^SET\s/i.test(t)) return true;
@@ -117,9 +181,9 @@ function isMetadataLine(line: string): boolean {
 
 /** Count delimiter characters in a line (outside quotes) */
 function countDelimiters(line: string): number {
-  // Check for caret delimiter first
-  if (isCaretDelimited(line)) {
-    return line.split(LMS_CARET_DELIM).length - 1;
+  // LMS format lines have many delimiters — count field blocks instead
+  if (isLMSDataLine(line) || isOracleLMSSQLHeader(line)) {
+    return parseLMSDataLine(line).length;
   }
   let count = 0;
   let inQuotes = false;
@@ -158,17 +222,19 @@ function isTitleLine(line: string, nextLine?: string): boolean {
 
 /** Detect the best delimiter for a header line */
 function detectDelimiter(line: string): string {
-  // 1. Check for Oracle LMS ^~*~^ caret delimiter first
-  if (isCaretDelimited(line)) return LMS_CARET_DELIM;
+  // 1. Oracle LMS SQL format: CHR(35)||'^~*~^'||COL||'^~*~^'||';'||...
+  if (isOracleLMSSQLHeader(line)) return "LMS_SQL";
 
-  // 2. Before counting standard delimiters, strip Oracle SQL artifacts
+  // 2. Oracle LMS data format: #^~*~^val^~*~^;^~*~^val^~*~^
+  if (isLMSDataLine(line)) return "LMS_DATA";
+
+  // 3. Standard delimiter detection — strip SQL artifacts first
   //    so that || in CHR(35)||COLUMN doesn't inflate pipe counts
   const cleanedLine = line
     .replace(/CHR\(\d+\)\s*\|\|/gi, "")
     .replace(/\|\|\s*CHR\(\d+\)/gi, "")
-    .replace(/\|\|/g, ""); // strip remaining SQL concat operators
+    .replace(/\|\|/g, "");
 
-  // Count potential delimiters (outside of quotes)
   let inQuotes = false;
   const counts: Record<string, number> = { ",": 0, "\t": 0, ";": 0, "|": 0 };
 
@@ -181,11 +247,6 @@ function detectDelimiter(line: string): string {
     }
   }
 
-  // 3. Also check if '#' is used as a field wrapper/delimiter
-  //    e.g. #VALUE#,#VALUE# — the real delimiter is the comma between #-wrapped fields
-  const hashWrapped = /^#[^#]*#[,|;\t]/.test(cleanedLine.trim());
-
-  // Pick the delimiter with the most occurrences
   let best = ",";
   let bestCount = 0;
   for (const [delim, count] of Object.entries(counts)) {
@@ -195,22 +256,24 @@ function detectDelimiter(line: string): string {
     }
   }
 
-  // If no delimiter found at all, fall back to whitespace splitting
-  if (bestCount === 0) {
-    // Last resort: check if line has # separators (rare but possible)
-    if (hashWrapped) return ",";
-    return "WHITESPACE";
-  }
+  if (bestCount === 0) return "WHITESPACE";
   return best;
 }
 
 /** Parse header line into cleaned, uppercased names */
 function parseHeaderLine(rawLine: string, delimiter: string): string[] {
-  let fields: string[];
+  // Oracle LMS SQL expression header — extract columns from SQL
+  if (delimiter === "LMS_SQL") {
+    return extractColumnsFromLMSSQL(rawLine);
+  }
 
-  if (delimiter === LMS_CARET_DELIM) {
-    fields = parseCaretLine(rawLine);
-  } else if (delimiter === "WHITESPACE") {
+  // Oracle LMS data-style header (rare: first line is data-formatted column names)
+  if (delimiter === "LMS_DATA") {
+    return parseLMSDataLine(rawLine).map((h) => h.toUpperCase());
+  }
+
+  let fields: string[];
+  if (delimiter === "WHITESPACE") {
     fields = rawLine.trim().split(/\s{2,}|\t+/).map((h) => h.trim());
   } else {
     fields = parseCSVLine(rawLine, delimiter);
@@ -218,9 +281,7 @@ function parseHeaderLine(rawLine: string, delimiter: string): string[] {
 
   return fields.map((h) => {
     let cleaned = h.trim().toUpperCase();
-    // Remove surrounding quotes
     cleaned = cleaned.replace(/^["']+|["']+$/g, "");
-    // Clean Oracle SQL artifacts (CHR(n), ||, #-wrappers, etc.)
     cleaned = cleanOracleSQL(cleaned);
     return cleaned;
   });
@@ -311,8 +372,9 @@ export function parseCSV(text: string): ParsedCSV {
     if (/^\d+ rows? selected/i.test(line.trim())) break;
 
     let values: string[];
-    if (delimiter === LMS_CARET_DELIM) {
-      values = parseCaretLine(line);
+    if (delimiter === "LMS_SQL" || delimiter === "LMS_DATA") {
+      // Data lines in LMS format: #^~*~^val^~*~^;^~*~^val^~*~^
+      values = parseLMSDataLine(line);
     } else if (delimiter === "WHITESPACE") {
       values = splitFixedWidth(rawHeaderLine, line);
     } else {
