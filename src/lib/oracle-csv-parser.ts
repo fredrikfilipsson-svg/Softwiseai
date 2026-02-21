@@ -47,28 +47,25 @@ const KNOWN_ORACLE_COLUMNS = new Set([
 const LMS_CARET_DELIM = "^~*~^";
 
 /**
- * Strip outer double-quotes from a line (some exports wrap the entire line in quotes).
- */
-function stripOuterQuotes(line: string): string {
-  const t = line.trim();
-  if (t.length >= 2 && t[0] === '"' && t[t.length - 1] === '"') {
-    return t.slice(1, -1);
-  }
-  // Also handle case where only a leading " exists (no closing quote)
-  if (t.startsWith('"') && !t.endsWith('"')) {
-    return t.slice(1);
-  }
-  return t;
-}
-
-/**
  * Detect whether a line is an Oracle LMS SQL expression header.
- * These contain CHR(35) and '^~*~^' string literals with || concat.
- * The line may be wrapped in outer double-quotes.
+ *
+ * These lines contain CHR(35) and the ^~*~^ token (with or without
+ * surrounding single-quotes) connected by || SQL concatenation.
+ * The line may optionally be wrapped in outer double-quotes.
+ *
+ * Patterns matched:
+ *   CHR(35)||'^~*~^'||COLUMN||'^~*~^'||';'||...
+ *   "CHR(35)||'^~*~^'||COLUMN||'^~*~^'||';'||..."
+ *   CHR(35)||^~*~^||COLUMN||^~*~^||;||...
  */
 function isOracleLMSSQLHeader(line: string): boolean {
-  const clean = stripOuterQuotes(line);
-  return /CHR\s*\(\s*35\s*\)/i.test(clean) && clean.includes("'^~*~^'");
+  // Check for CHR(35) anywhere in the line (with flexible whitespace)
+  const hasCHR35 = /CHR\s*\(\s*35\s*\)/i.test(line);
+  // Check for ^~*~^ token (with or without surrounding quotes)
+  const hasCaret = /\^~\*~\^/.test(line);
+  // Check for || SQL concatenation
+  const hasConcat = line.includes("||");
+  return hasCHR35 && hasCaret && hasConcat;
 }
 
 /**
@@ -78,12 +75,14 @@ function isOracleLMSSQLHeader(line: string): boolean {
  * Output: ["APPLICATION_ID", "CREATION_DATE"]
  */
 function extractColumnsFromLMSSQL(sqlLine: string): string[] {
-  // Strip outer quotes (some exports wrap the SQL in double-quotes)
-  const clean = stripOuterQuotes(sqlLine);
+  // Strip outer double-quotes (some exports wrap the entire SQL in quotes)
+  let clean = sqlLine.trim();
+  if (clean.startsWith('"')) clean = clean.slice(1);
+  if (clean.endsWith('"')) clean = clean.slice(0, -1);
 
-  // Split on ||';'|| to separate field segments
-  // The ';' literal is the separator between field blocks
-  const segments = clean.split(/\|\|\s*';'\s*\|\|/);
+  // Split on ||';'|| or ||;|| to separate field segments
+  // The ';' or ; literal is the separator between field blocks
+  const segments = clean.split(/\|\|\s*'?;'?\s*\|\|/);
 
   const columns: string[] = [];
   for (const seg of segments) {
@@ -135,8 +134,10 @@ function extractColumnsFromLMSSQL(sqlLine: string): string[] {
  * and ; separates the field blocks.
  */
 function parseLMSDataLine(line: string): string[] {
-  // Strip outer quotes first
-  let clean = stripOuterQuotes(line);
+  // Strip outer double-quotes
+  let clean = line.trim();
+  if (clean.startsWith('"')) clean = clean.slice(1);
+  if (clean.endsWith('"')) clean = clean.slice(0, -1);
 
   // Strip leading/trailing # (CHR(35) artifact)
   clean = clean.replace(/^#+/, "").replace(/#+$/, "");
@@ -182,9 +183,9 @@ function isMetadataLine(line: string): boolean {
   // Only treat '#' lines as comments if they look like actual comments,
   // NOT like LMS data (#^~*~^val^~*~^) or CHR(35) wrapped data (#val#,#val#)
   // Also handle quoted lines ("# ...")
-  const unquoted = stripOuterQuotes(t);
-  if ((t.startsWith("#") || unquoted.startsWith("#")) &&
-      !t.includes(LMS_CARET_DELIM) && !unquoted.includes(LMS_CARET_DELIM) &&
+  const tUnquoted = t.startsWith('"') ? t.slice(1) : t;
+  if ((t.startsWith("#") || tUnquoted.startsWith("#")) &&
+      !t.includes(LMS_CARET_DELIM) &&
       !/#[^#]+#[,|;\t]/.test(t) && !/^"?#[^#]*#"?$/.test(t)) return true;
   if (/^REM\s/i.test(t)) return true;
   if (/^SQL>/i.test(t)) return true;
@@ -364,6 +365,15 @@ export function parseCSV(text: string): ParsedCSV {
   let rawHeaderLine = allLines[headerIndex];
   let delimiter = detectDelimiter(rawHeaderLine);
   let headers = parseHeaderLine(rawHeaderLine, delimiter);
+
+  // Diagnostic: log LMS detection for troubleshooting
+  console.log(`[parseCSV] headerLine[0..80]: "${rawHeaderLine.substring(0, 80)}"`,
+    `| isLMS=${isOracleLMSSQLHeader(rawHeaderLine)}`,
+    `| hasCaretToken=${/\^~\*~\^/.test(rawHeaderLine)}`,
+    `| hasCHR35=${/CHR\s*\(\s*35\s*\)/i.test(rawHeaderLine)}`,
+    `| hasConcat=${rawHeaderLine.includes("||")}`,
+    `| detectedDelim="${delimiter}"`,
+    `| headers(first3)=[${headers.slice(0, 3).join(", ")}]`);
 
   // Validate: if headers don't contain any known Oracle columns AND there's a next line,
   // try the next line as the real header (handles extra title/description lines)
