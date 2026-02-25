@@ -433,6 +433,10 @@ export default function FinancePage() {
 
   return (
     <div style={S.pageBg}>
+      {/* TEST BANNER - remove after confirming */}
+      <div style={{ background: "#C23934", color: "white", padding: 16, fontSize: 20, fontWeight: 800, textAlign: "center", letterSpacing: 2 }}>
+        NEW SALESFORCE UI v2 - IF YOU SEE THIS THE NEW CODE IS RUNNING
+      </div>
       {/* ── HEADER ─────────────────────────────────────── */}
       <header style={S.header}>
         <div style={{ maxWidth: 1400, margin: "0 auto", padding: "0 24px" }}>
