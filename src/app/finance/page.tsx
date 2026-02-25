@@ -54,6 +54,31 @@ function totalInvoiced(p: FinanceProject) {
     .reduce((s, i) => s + i.amount, 0);
 }
 
+function getDueInvoices(p: FinanceProject): Invoice[] {
+  const today = new Date().toISOString().split("T")[0];
+  return p.invoices.filter(
+    (i) => i.status === "pending" && i.date && i.date <= today
+  );
+}
+
+async function sendInvoiceReminder(
+  project: FinanceProject,
+  invoice: Invoice
+): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch("/api/invoice-reminder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      clientName: project.clientName,
+      vendorType: VENDOR_LABELS[project.vendorType],
+      invoiceDate: invoice.date,
+      invoiceAmount: invoice.amount,
+      projectRevenue: project.revenue,
+    }),
+  });
+  return res.json();
+}
+
 const VENDOR_COLORS: Record<VendorType, string> = {
   oracle: "#f43f5e",
   ibm: "#3b82f6",
@@ -589,6 +614,36 @@ function ProjectsTable({
   onDelete: (id: string) => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [sendingReminder, setSendingReminder] = useState<string | null>(null);
+  const [reminderResult, setReminderResult] = useState<{
+    id: string;
+    success: boolean;
+    message: string;
+  } | null>(null);
+
+  async function handleSendReminder(project: FinanceProject, invoice: Invoice) {
+    const key = `${project.id}-${invoice.id}`;
+    setSendingReminder(key);
+    setReminderResult(null);
+    try {
+      const result = await sendInvoiceReminder(project, invoice);
+      setReminderResult({
+        id: key,
+        success: result.success ?? false,
+        message: result.success
+          ? "Reminder sent!"
+          : result.error ?? "Failed to send",
+      });
+    } catch {
+      setReminderResult({
+        id: key,
+        success: false,
+        message: "Network error",
+      });
+    }
+    setSendingReminder(null);
+    setTimeout(() => setReminderResult(null), 4000);
+  }
 
   return (
     <div className="space-y-4">
@@ -671,41 +726,80 @@ function ProjectsTable({
                         {invoiced > 0 ? fmt(invoiced) : "—"}
                       </td>
                       <td className="px-4 py-3 text-gray-500">
-                        {p.invoices.length > 0 ? (
-                          <span title={p.invoices.map((i) => `${i.date} (${i.status})`).join(", ")}>
-                            {p.invoices.length} invoice
-                            {p.invoices.length !== 1 ? "s" : ""}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
+                        {(() => {
+                          const due = getDueInvoices(p);
+                          return p.invoices.length > 0 ? (
+                            <div>
+                              <span title={p.invoices.map((i) => `${i.date} (${i.status})`).join(", ")}>
+                                {p.invoices.length} invoice
+                                {p.invoices.length !== 1 ? "s" : ""}
+                              </span>
+                              {due.length > 0 && (
+                                <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700">
+                                  {due.length} due
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            "—"
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <div className="flex gap-2 justify-end">
-                          <button
-                            onClick={() => onEdit(p.id)}
-                            className="text-brand-600 hover:text-brand-700 text-xs font-medium"
-                          >
-                            Edit
-                          </button>
-                          {confirmDelete === p.id ? (
+                        <div className="flex flex-col gap-1 items-end">
+                          <div className="flex gap-2">
                             <button
-                              onClick={() => {
-                                onDelete(p.id);
-                                setConfirmDelete(null);
-                              }}
-                              className="text-red-600 hover:text-red-700 text-xs font-medium"
+                              onClick={() => onEdit(p.id)}
+                              className="text-brand-600 hover:text-brand-700 text-xs font-medium"
                             >
-                              Confirm?
+                              Edit
                             </button>
-                          ) : (
-                            <button
-                              onClick={() => setConfirmDelete(p.id)}
-                              className="text-gray-400 hover:text-red-500 text-xs font-medium"
-                            >
-                              Delete
-                            </button>
-                          )}
+                            {confirmDelete === p.id ? (
+                              <button
+                                onClick={() => {
+                                  onDelete(p.id);
+                                  setConfirmDelete(null);
+                                }}
+                                className="text-red-600 hover:text-red-700 text-xs font-medium"
+                              >
+                                Confirm?
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setConfirmDelete(p.id)}
+                                className="text-gray-400 hover:text-red-500 text-xs font-medium"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                          {getDueInvoices(p).map((inv) => {
+                            const key = `${p.id}-${inv.id}`;
+                            return (
+                              <div key={inv.id} className="flex items-center gap-1">
+                                <button
+                                  onClick={() => handleSendReminder(p, inv)}
+                                  disabled={sendingReminder === key}
+                                  className="text-[10px] px-2 py-0.5 rounded bg-red-50 text-red-600 hover:bg-red-100 font-medium disabled:opacity-50 transition whitespace-nowrap"
+                                >
+                                  {sendingReminder === key
+                                    ? "Sending…"
+                                    : `Remind ${inv.date}`}
+                                </button>
+                                {reminderResult?.id === key && (
+                                  <span
+                                    className={`text-[10px] font-medium ${
+                                      reminderResult.success
+                                        ? "text-emerald-600"
+                                        : "text-red-600"
+                                    }`}
+                                  >
+                                    {reminderResult.message}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </td>
                     </tr>
