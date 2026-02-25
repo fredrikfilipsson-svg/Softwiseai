@@ -18,6 +18,7 @@ export type VendorType =
   | "workday"
   | "sap"
   | "salesforce"
+  | "broadcom"
   | "other";
 
 export const VENDOR_LABELS: Record<VendorType, string> = {
@@ -27,6 +28,29 @@ export const VENDOR_LABELS: Record<VendorType, string> = {
   workday: "Workday",
   sap: "SAP",
   salesforce: "Salesforce",
+  broadcom: "Broadcom",
+  other: "Other",
+};
+
+export const VENDOR_PROJECT_TYPES: Record<VendorType, string[]> = {
+  oracle: ["Java", "Audit", "Licensing Review", "ULA", "Negotiation", "Cost Optimization", "Other"],
+  ibm: ["Audit Defense", "License Review", "Negotiation", "Other"],
+  microsoft: ["EA Renewal", "Negotiation", "Licensing", "Other"],
+  workday: ["Negotiation", "Other"],
+  sap: ["Rise with SAP", "S/4HANA", "Negotiation", "Other"],
+  salesforce: ["Negotiation", "Licensing", "Other"],
+  broadcom: ["Negotiation", "Audit", "Other"],
+  other: ["Other"],
+};
+
+export type LeadSource = "web" | "gartner" | "existing_customer" | "referral" | "ai" | "other";
+
+export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
+  web: "Web",
+  gartner: "Gartner",
+  existing_customer: "Existing Customer",
+  referral: "Referral",
+  ai: "AI",
   other: "Other",
 };
 
@@ -36,6 +60,8 @@ export interface FinanceProject {
   id: string;
   clientName: string;
   vendorType: VendorType;
+  projectType: string;
+  leadSource: LeadSource;
   revenue: number;
   costs: Cost[];
   invoiceCount: number;

@@ -20,7 +20,10 @@ import {
   Invoice,
   VendorType,
   ProjectStatus,
+  LeadSource,
   VENDOR_LABELS,
+  VENDOR_PROJECT_TYPES,
+  LEAD_SOURCE_LABELS,
   YearlyTarget,
 } from "@/lib/finance-types";
 import {
@@ -86,6 +89,7 @@ const VENDOR_COLORS: Record<VendorType, string> = {
   workday: "#f59e0b",
   sap: "#10b981",
   salesforce: "#8b5cf6",
+  broadcom: "#ec4899",
   other: "#6b7280",
 };
 
@@ -682,6 +686,8 @@ function ProjectsTable({
                 <tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   <th className="px-4 py-3">Client</th>
                   <th className="px-4 py-3">Vendor</th>
+                  <th className="px-4 py-3">Project Type</th>
+                  <th className="px-4 py-3">Lead Source</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">Revenue</th>
                   <th className="px-4 py-3 text-right">Costs</th>
@@ -707,6 +713,14 @@ function ProjectsTable({
                           }}
                         />
                         {VENDOR_LABELS[p.vendorType]}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {p.projectType || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {p.leadSource
+                          ? LEAD_SOURCE_LABELS[p.leadSource] ?? p.leadSource
+                          : "—"}
                       </td>
                       <td className="px-4 py-3">
                         <span
@@ -830,6 +844,10 @@ function ProjectForm({
   const [vendorType, setVendorType] = useState<VendorType>(
     existing?.vendorType ?? "microsoft"
   );
+  const [projectType, setProjectType] = useState(existing?.projectType ?? "");
+  const [leadSource, setLeadSource] = useState<LeadSource>(
+    existing?.leadSource ?? "web"
+  );
   const [revenue, setRevenue] = useState(existing?.revenue?.toString() ?? "");
   const [status, setStatus] = useState<ProjectStatus>(
     existing?.status ?? "won"
@@ -843,6 +861,16 @@ function ProjectForm({
   const [invoices, setInvoices] = useState<Invoice[]>(
     existing?.invoices ?? []
   );
+
+  // reset project type when vendor changes (unless editing existing)
+  useEffect(() => {
+    if (!existing) {
+      setProjectType("");
+    } else if (!VENDOR_PROJECT_TYPES[vendorType].includes(projectType)) {
+      setProjectType("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vendorType]);
 
   // sync invoice slots when count changes
   useEffect(() => {
@@ -915,6 +943,8 @@ function ProjectForm({
       id: existing?.id ?? uid(),
       clientName: clientName.trim(),
       vendorType,
+      projectType,
+      leadSource,
       revenue: parseFloat(revenue) || 0,
       costs,
       invoiceCount: parseInt(invoiceCount) || 0,
@@ -959,6 +989,43 @@ function ProjectForm({
             className="input-field w-full"
           >
             {Object.entries(VENDOR_LABELS).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Project Type + Lead Source */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Project Type
+          </label>
+          <select
+            value={projectType}
+            onChange={(e) => setProjectType(e.target.value)}
+            className="input-field w-full"
+          >
+            <option value="">Select type…</option>
+            {VENDOR_PROJECT_TYPES[vendorType].map((pt) => (
+              <option key={pt} value={pt}>
+                {pt}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Lead Source
+          </label>
+          <select
+            value={leadSource}
+            onChange={(e) => setLeadSource(e.target.value as LeadSource)}
+            className="input-field w-full"
+          >
+            {Object.entries(LEAD_SOURCE_LABELS).map(([key, label]) => (
               <option key={key} value={key}>
                 {label}
               </option>
