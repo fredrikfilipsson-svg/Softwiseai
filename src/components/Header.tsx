@@ -34,6 +34,12 @@ export default function Header() {
           </Link>
           <nav className="flex items-center gap-4">
             <Link
+              href="/finance"
+              className="text-sm font-medium text-gray-600 hover:text-brand-600 transition"
+            >
+              Finance Tracker
+            </Link>
+            <Link
               href="/benchmark"
               className="btn-primary text-sm"
             >
