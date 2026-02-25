@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, CSSProperties } from "react";
 import Link from "next/link";
 import {
   BarChart,
@@ -34,6 +34,108 @@ import {
   getYearlyTarget,
   saveYearlyTarget,
 } from "@/lib/finance-store";
+
+// ── inline style constants ──────────────────────────────────
+const S = {
+  pageBg: { background: "#f3f5f9", minHeight: "100vh" } as CSSProperties,
+  header: { background: "linear-gradient(135deg, #032D60 0%, #0176D3 100%)" } as CSSProperties,
+  card: {
+    background: "white",
+    borderRadius: 12,
+    boxShadow: "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
+    border: "1px solid rgba(0,0,0,0.05)",
+  } as CSSProperties,
+  chartCard: {
+    background: "white",
+    borderRadius: 12,
+    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+    border: "1px solid rgba(0,0,0,0.05)",
+    padding: 24,
+  } as CSSProperties,
+  kpi: (accentColor: string) =>
+    ({
+      background: "white",
+      borderRadius: 12,
+      boxShadow: "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
+      border: "1px solid rgba(0,0,0,0.05)",
+      position: "relative" as const,
+      overflow: "hidden" as const,
+      borderTop: `3px solid ${accentColor}`,
+      padding: 20,
+    }) as CSSProperties,
+  th: {
+    background: "#FAFBFC",
+    fontSize: 11,
+    fontWeight: 700,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.05em",
+    color: "#6B7280",
+    padding: "10px 16px",
+    borderBottom: "2px solid #E5E7EB",
+  } as CSSProperties,
+  td: {
+    padding: "12px 16px",
+    fontSize: 13,
+    borderBottom: "1px solid #F3F4F6",
+  } as CSSProperties,
+  gradientCard: (bg: string) =>
+    ({
+      background: bg,
+      borderRadius: 12,
+      padding: "20px 24px",
+      position: "relative" as const,
+      overflow: "hidden" as const,
+      color: "white",
+    }) as CSSProperties,
+  tab: (active: boolean) =>
+    ({
+      position: "relative" as const,
+      color: active ? "#fff" : "rgba(255,255,255,0.7)",
+      padding: "12px 20px",
+      fontSize: 13,
+      fontWeight: active ? 600 : 500,
+      letterSpacing: "0.01em",
+      background: "transparent",
+      border: "none",
+      cursor: "pointer",
+      borderBottom: active ? "3px solid white" : "3px solid transparent",
+    }) as CSSProperties,
+  badge: (bg: string, color: string) =>
+    ({
+      display: "inline-flex",
+      alignItems: "center",
+      padding: "2px 10px",
+      borderRadius: 9999,
+      fontSize: 11,
+      fontWeight: 600,
+      letterSpacing: "0.02em",
+      background: bg,
+      color,
+    }) as CSSProperties,
+  progressTrack: {
+    background: "#E5E7EB",
+    borderRadius: 9999,
+    height: 8,
+    overflow: "hidden" as const,
+  } as CSSProperties,
+  progressFill: (width: number, bg: string) =>
+    ({
+      height: "100%",
+      borderRadius: 9999,
+      width: `${width}%`,
+      background: bg,
+      transition: "width 0.8s cubic-bezier(0.4, 0, 0.2, 1)",
+    }) as CSSProperties,
+  input: {
+    width: "100%",
+    borderRadius: 6,
+    border: "1px solid #D1D5DB",
+    padding: "8px 12px",
+    fontSize: 14,
+    outline: "none",
+    transition: "border-color 0.15s",
+  } as CSSProperties,
+};
 
 // ── helpers ─────────────────────────────────────────────────
 function uid() {
@@ -95,10 +197,10 @@ const VENDOR_COLORS: Record<VendorType, string> = {
   other: "#747474",
 };
 
-const STATUS_CFG: Record<ProjectStatus, { bg: string; text: string; dot: string }> = {
-  won: { bg: "bg-[#E3F5E1]", text: "text-[#2E844A]", dot: "bg-[#2E844A]" },
-  lost: { bg: "bg-[#FDE8E8]", text: "text-[#C23934]", dot: "bg-[#C23934]" },
-  pending: { bg: "bg-[#FFF3E0]", text: "text-[#E87600]", dot: "bg-[#E87600]" },
+const STATUS_CFG: Record<ProjectStatus, { bg: string; text: string; dotColor: string }> = {
+  won: { bg: "#E3F5E1", text: "#2E844A", dotColor: "#2E844A" },
+  lost: { bg: "#FDE8E8", text: "#C23934", dotColor: "#C23934" },
+  pending: { bg: "#FFF3E0", text: "#E87600", dotColor: "#E87600" },
 };
 
 // ── tab types ───────────────────────────────────────────────
@@ -108,7 +210,7 @@ type ProjectFilter = "all" | "won" | "won_not_invoiced";
 // ── icons ───────────────────────────────────────────────────
 function IconTrendUp() {
   return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <svg width={16} height={16} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M2 17l6-6 4 4 8-8m0 0h-6m6 0v6" />
     </svg>
   );
@@ -116,7 +218,7 @@ function IconTrendUp() {
 
 function IconDollar() {
   return (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <svg width={20} height={20} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V6m0 8v2" />
     </svg>
   );
@@ -124,7 +226,7 @@ function IconDollar() {
 
 function IconChart() {
   return (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <svg width={20} height={20} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
     </svg>
   );
@@ -132,9 +234,75 @@ function IconChart() {
 
 function IconCheck() {
   return (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+    <svg width={14} height={14} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
     </svg>
+  );
+}
+
+function IconPlus() {
+  return (
+    <svg width={14} height={14} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+    </svg>
+  );
+}
+
+function IconX() {
+  return (
+    <svg width={16} height={16} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
+// ── reusable small components ────────────────────────────────
+function VendorDot({ vendor }: { vendor: VendorType }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 8,
+        height: 8,
+        borderRadius: "50%",
+        backgroundColor: VENDOR_COLORS[vendor],
+        marginRight: 6,
+      }}
+    />
+  );
+}
+
+function StatusBadge({ status }: { status: ProjectStatus }) {
+  const cfg = STATUS_CFG[status];
+  return (
+    <span style={S.badge(cfg.bg, cfg.text)}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.dotColor, marginRight: 6 }} />
+      {status.charAt(0).toUpperCase() + status.slice(1)}
+    </span>
+  );
+}
+
+function Checkbox({ checked, onChange }: { checked: boolean; onChange: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onChange}
+      style={{
+        width: 18,
+        height: 18,
+        borderRadius: 4,
+        border: checked ? "2px solid #0176D3" : "2px solid #D1D5DB",
+        background: checked ? "#0176D3" : "white",
+        color: "white",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        transition: "all 0.15s",
+      }}
+    >
+      {checked && <IconCheck />}
+    </button>
   );
 }
 
@@ -249,10 +417,10 @@ export default function FinancePage() {
 
   if (!loaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center finance-bg">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-3 border-[#0176D3] border-t-transparent animate-spin" />
-          <span className="text-sm text-gray-500 font-medium">Loading…</span>
+      <div style={{ ...S.pageBg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 32, height: 32, borderRadius: "50%", border: "3px solid #0176D3", borderTopColor: "transparent", animation: "spin 1s linear infinite" }} />
+          <span style={{ fontSize: 14, color: "#6B7280", fontWeight: 500 }}>Loading…</span>
         </div>
       </div>
     );
@@ -264,43 +432,40 @@ export default function FinancePage() {
       : 0;
 
   return (
-    <div className="min-h-screen finance-bg">
+    <div style={S.pageBg}>
       {/* ── HEADER ─────────────────────────────────────── */}
-      <header className="sf-header">
-        <div className="max-w-[1400px] mx-auto px-6">
+      <header style={S.header}>
+        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "0 24px" }}>
           {/* Top bar */}
-          <div className="flex items-center justify-between h-14">
-            <div className="flex items-center gap-3">
-              <Link href="/" className="flex items-center gap-2 group">
-                <div className="w-7 h-7 rounded-md bg-white/15 flex items-center justify-center group-hover:bg-white/25 transition">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <Link href="/" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none" }}>
+                <div style={{ width: 28, height: 28, borderRadius: 6, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", color: "white" }}>
                   <IconChart />
                 </div>
-                <span className="text-white/90 text-sm font-semibold group-hover:text-white transition">
+                <span style={{ color: "rgba(255,255,255,0.9)", fontSize: 14, fontWeight: 600 }}>
                   SoftwiseAI
                 </span>
               </Link>
-              <span className="text-white/30 text-sm">/</span>
-              <span className="text-white font-semibold text-sm">
+              <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 14 }}>/</span>
+              <span style={{ color: "white", fontWeight: 600, fontSize: 14 }}>
                 Finance & Redress Tracker
               </span>
             </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => {
-                  setEditingId(null);
-                  setTab("add");
-                }}
-                className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 text-white text-xs font-semibold px-4 py-2 rounded-md transition"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-                New Project
-              </button>
-            </div>
+            <button
+              onClick={() => { setEditingId(null); setTab("add"); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                background: "rgba(255,255,255,0.15)", color: "white",
+                fontSize: 12, fontWeight: 600, padding: "8px 16px",
+                borderRadius: 6, border: "none", cursor: "pointer",
+              }}
+            >
+              <IconPlus /> New Project
+            </button>
           </div>
           {/* Tabs */}
-          <nav className="flex gap-0.5 -mb-px">
+          <nav style={{ display: "flex", gap: 2 }}>
             {(
               [
                 ["dashboard", "Dashboard"],
@@ -311,11 +476,8 @@ export default function FinancePage() {
             ).map(([key, label]) => (
               <button
                 key={key}
-                onClick={() => {
-                  if (key !== "add") setEditingId(null);
-                  setTab(key);
-                }}
-                className={`sf-tab ${tab === key ? "sf-tab-active" : ""}`}
+                onClick={() => { if (key !== "add") setEditingId(null); setTab(key); }}
+                style={S.tab(tab === key)}
               >
                 {label}
               </button>
@@ -325,7 +487,7 @@ export default function FinancePage() {
       </header>
 
       {/* ── CONTENT ────────────────────────────────────── */}
-      <main className="max-w-[1400px] mx-auto px-6 py-6">
+      <main style={{ maxWidth: 1400, margin: "0 auto", padding: "24px 24px" }}>
         {tab === "dashboard" && (
           <Dashboard
             totalRevenue={totalRevenue}
@@ -361,16 +523,9 @@ export default function FinancePage() {
         )}
         {tab === "add" && (
           <ProjectForm
-            existing={
-              editingId
-                ? projects.find((p) => p.id === editingId) ?? null
-                : null
-            }
+            existing={editingId ? projects.find((p) => p.id === editingId) ?? null : null}
             onSave={handleSaveProject}
-            onCancel={() => {
-              setEditingId(null);
-              setTab("projects");
-            }}
+            onCancel={() => { setEditingId(null); setTab("projects"); }}
           />
         )}
       </main>
@@ -416,57 +571,57 @@ function Dashboard({
   );
   const currentYear = new Date().getFullYear();
 
+  const labelStyle: CSSProperties = {
+    fontSize: 11, fontWeight: 700, color: "#6B7280",
+    textTransform: "uppercase", letterSpacing: "0.05em",
+  };
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       {/* ── TARGET ─────────────────────────── */}
-      <div className="sf-card p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-[#EEF4FF] flex items-center justify-center">
-              <svg className="w-4 h-4 text-[#0176D3]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
+      <div style={{ ...S.card, padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "#EEF4FF", display: "flex", alignItems: "center", justifyContent: "center", color: "#0176D3" }}>
+              <IconChart />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-[#181818]">
+              <h2 style={{ fontSize: 14, fontWeight: 700, color: "#181818", margin: 0 }}>
                 {currentYear} Revenue Target
               </h2>
               {target && (
-                <p className="text-xs text-gray-500">
-                  {fmt(target.targetRevenue - totalRevenue > 0 ? target.targetRevenue - totalRevenue : 0)} remaining
+                <p style={{ fontSize: 12, color: "#6B7280", margin: 0 }}>
+                  {fmt(Math.max(target.targetRevenue - totalRevenue, 0))} remaining
                 </p>
               )}
             </div>
           </div>
           <button
             onClick={() => setShowTargetForm(!showTargetForm)}
-            className="text-xs font-semibold text-[#0176D3] hover:text-[#014486] px-3 py-1.5 rounded-md hover:bg-[#EEF4FF] transition"
+            style={{ fontSize: 12, fontWeight: 600, color: "#0176D3", background: "none", border: "none", cursor: "pointer", padding: "6px 12px", borderRadius: 6 }}
           >
             {target ? "Edit" : "Set Target"}
           </button>
         </div>
 
         {showTargetForm && (
-          <div className="flex gap-2 mb-4">
-            <div className="relative flex-1 max-w-xs">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <div style={{ position: "relative", flex: 1, maxWidth: 250 }}>
+              <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#9CA3AF", fontSize: 14 }}>$</span>
               <input
                 type="number"
                 value={targetInput}
                 onChange={(e) => setTargetInput(e.target.value)}
                 placeholder="500,000"
-                className="w-full rounded-md border border-gray-300 pl-7 pr-3 py-2 text-sm focus:border-[#0176D3] focus:ring-2 focus:ring-[#0176D3]/20 outline-none transition"
+                style={{ ...S.input, paddingLeft: 28 }}
               />
             </div>
             <button
               onClick={() => {
                 const val = parseFloat(targetInput);
-                if (val > 0) {
-                  onSetTarget({ year: currentYear, targetRevenue: val });
-                  setShowTargetForm(false);
-                }
+                if (val > 0) { onSetTarget({ year: currentYear, targetRevenue: val }); setShowTargetForm(false); }
               }}
-              className="bg-[#0176D3] hover:bg-[#014486] text-white text-sm font-semibold px-5 py-2 rounded-md transition"
+              style={{ background: "#0176D3", color: "white", fontSize: 14, fontWeight: 600, padding: "8px 20px", borderRadius: 6, border: "none", cursor: "pointer" }}
             >
               Save
             </button>
@@ -475,148 +630,126 @@ function Dashboard({
 
         {target ? (
           <div>
-            <div className="flex justify-between text-xs mb-1.5">
-              <span className="font-semibold text-[#181818]">
-                {fmt(totalRevenue)}
-                <span className="font-normal text-gray-500">
-                  {" "}of {fmt(target.targetRevenue)}
-                </span>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
+              <span>
+                <strong style={{ color: "#181818" }}>{fmt(totalRevenue)}</strong>
+                <span style={{ color: "#6B7280" }}> of {fmt(target.targetRevenue)}</span>
               </span>
-              <span
-                className="font-bold"
-                style={{
-                  color:
-                    targetProgress >= 100
-                      ? "#2E844A"
-                      : targetProgress >= 60
-                        ? "#0176D3"
-                        : "#E87600",
-                }}
-              >
+              <span style={{
+                fontWeight: 700,
+                color: targetProgress >= 100 ? "#2E844A" : targetProgress >= 60 ? "#0176D3" : "#E87600",
+              }}>
                 {targetProgress.toFixed(1)}%
               </span>
             </div>
-            <div className="sf-progress-track">
-              <div
-                className="sf-progress-fill"
-                style={{
-                  width: `${targetProgress}%`,
-                  background:
-                    targetProgress >= 100
-                      ? "linear-gradient(90deg, #2E844A, #45C65A)"
-                      : targetProgress >= 60
-                        ? "linear-gradient(90deg, #0176D3, #1B96FF)"
-                        : "linear-gradient(90deg, #E87600, #FE9339)",
-                }}
-              />
+            <div style={S.progressTrack}>
+              <div style={S.progressFill(
+                targetProgress,
+                targetProgress >= 100
+                  ? "linear-gradient(90deg, #2E844A, #45C65A)"
+                  : targetProgress >= 60
+                    ? "linear-gradient(90deg, #0176D3, #1B96FF)"
+                    : "linear-gradient(90deg, #E87600, #FE9339)"
+              )} />
             </div>
           </div>
         ) : (
-          <p className="text-sm text-gray-400">
-            Set a revenue target to track your progress.
-          </p>
+          <p style={{ fontSize: 14, color: "#9CA3AF", margin: 0 }}>Set a revenue target to track your progress.</p>
         )}
       </div>
 
       {/* ── KPI CARDS ──────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="sf-kpi sf-kpi-green p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Revenue Won
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-[#E3F5E1] flex items-center justify-center text-[#2E844A]">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
+        {/* Revenue Won */}
+        <div style={S.kpi("#2E844A")}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <span style={labelStyle}>Revenue Won</span>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "#E3F5E1", display: "flex", alignItems: "center", justifyContent: "center", color: "#2E844A" }}>
               <IconDollar />
             </div>
           </div>
-          <p className="text-2xl font-extrabold text-[#181818] tracking-tight">
+          <p style={{ fontSize: 24, fontWeight: 800, color: "#181818", letterSpacing: "-0.02em", margin: 0 }}>
             {fmt(totalRevenue)}
           </p>
-          <div className="flex items-center gap-1 mt-1.5">
-            <span className="text-[#2E844A]"><IconTrendUp /></span>
-            <span className="text-xs text-gray-500">
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 6, color: "#2E844A" }}>
+            <IconTrendUp />
+            <span style={{ fontSize: 12, color: "#6B7280" }}>
               {wonCount} project{wonCount !== 1 ? "s" : ""}
             </span>
           </div>
         </div>
 
-        <div className="sf-kpi sf-kpi-red p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Total Costs
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-[#FDE8E8] flex items-center justify-center text-[#C23934]">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        {/* Total Costs */}
+        <div style={S.kpi("#C23934")}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <span style={labelStyle}>Total Costs</span>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "#FDE8E8", display: "flex", alignItems: "center", justifyContent: "center", color: "#C23934" }}>
+              <svg width={20} height={20} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2 6.75H5.625c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
               </svg>
             </div>
           </div>
-          <p className="text-2xl font-extrabold text-[#181818] tracking-tight">
+          <p style={{ fontSize: 24, fontWeight: 800, color: "#181818", letterSpacing: "-0.02em", margin: 0 }}>
             {fmt(totalCosts)}
           </p>
-          <p className="text-xs text-gray-500 mt-1.5">
+          <p style={{ fontSize: 12, color: "#6B7280", marginTop: 6, margin: 0 }}>
             Across {projectCount} project{projectCount !== 1 ? "s" : ""}
           </p>
         </div>
 
-        <div className="sf-kpi sf-kpi-blue p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Net Profit
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-[#EEF4FF] flex items-center justify-center text-[#0176D3]">
+        {/* Net Profit */}
+        <div style={S.kpi("#0176D3")}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <span style={labelStyle}>Net Profit</span>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "#EEF4FF", display: "flex", alignItems: "center", justifyContent: "center", color: "#0176D3" }}>
               <IconChart />
             </div>
           </div>
-          <p className={`text-2xl font-extrabold tracking-tight ${totalProfit >= 0 ? "text-[#181818]" : "text-[#C23934]"}`}>
+          <p style={{ fontSize: 24, fontWeight: 800, color: totalProfit >= 0 ? "#181818" : "#C23934", letterSpacing: "-0.02em", margin: 0 }}>
             {fmt(totalProfit)}
           </p>
-          <p className="text-xs text-gray-500 mt-1.5">
-            {totalRevenue > 0
-              ? `${((totalProfit / totalRevenue) * 100).toFixed(1)}% margin`
-              : "No revenue yet"}
+          <p style={{ fontSize: 12, color: "#6B7280", marginTop: 6, margin: 0 }}>
+            {totalRevenue > 0 ? `${((totalProfit / totalRevenue) * 100).toFixed(1)}% margin` : "No revenue yet"}
           </p>
         </div>
 
-        <div className="sf-kpi sf-kpi-amber p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Won Not Invoiced
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-[#FFF3E0] flex items-center justify-center text-[#E87600]">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        {/* Won Not Invoiced */}
+        <div style={S.kpi("#E87600")}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <span style={labelStyle}>Won Not Invoiced</span>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "#FFF3E0", display: "flex", alignItems: "center", justifyContent: "center", color: "#E87600" }}>
+              <svg width={20} height={20} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
           </div>
-          <p className="text-2xl font-extrabold text-[#181818] tracking-tight">
+          <p style={{ fontSize: 24, fontWeight: 800, color: "#181818", letterSpacing: "-0.02em", margin: 0 }}>
             {fmt(wonNotInvoicedRevenue)}
           </p>
-          <p className="text-xs text-gray-500 mt-1.5">
+          <p style={{ fontSize: 12, color: "#6B7280", marginTop: 6, margin: 0 }}>
             {wonNotInvoicedCount} project{wonNotInvoicedCount !== 1 ? "s" : ""}
           </p>
         </div>
       </div>
 
-      {/* ── CHARTS ─────────────────────────── */}
+      {/* ── EMPTY STATE ────────────────────── */}
       {projectCount === 0 && (
-        <div className="sf-card p-12 text-center">
-          <div className="w-12 h-12 rounded-full bg-[#EEF4FF] flex items-center justify-center mx-auto mb-3">
+        <div style={{ ...S.card, padding: 48, textAlign: "center" }}>
+          <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#EEF4FF", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px", color: "#0176D3" }}>
             <IconChart />
           </div>
-          <p className="text-sm font-medium text-gray-500">
+          <p style={{ fontSize: 14, fontWeight: 500, color: "#6B7280", margin: 0 }}>
             Add your first project to see charts and analytics.
           </p>
         </div>
       )}
 
+      {/* ── CHARTS ─────────────────────────── */}
       {revenueByVendor.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="sf-chart-card">
-            <h3 className="text-[13px] font-bold text-[#181818] mb-1">
-              Revenue by Vendor
-            </h3>
-            <p className="text-[11px] text-gray-500 mb-4">Won projects only</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: 24 }}>
+          <div style={S.chartCard}>
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: "#181818", margin: "0 0 2px" }}>Revenue by Vendor</h3>
+            <p style={{ fontSize: 11, color: "#6B7280", margin: "0 0 16px" }}>Won projects only</p>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={revenueByVendor} barCategoryGap="20%">
                 <XAxis dataKey="vendor" tick={{ fontSize: 11, fill: "#6B7280" }} axisLine={false} tickLine={false} />
@@ -631,11 +764,9 @@ function Dashboard({
             </ResponsiveContainer>
           </div>
 
-          <div className="sf-chart-card">
-            <h3 className="text-[13px] font-bold text-[#181818] mb-1">
-              Project Status
-            </h3>
-            <p className="text-[11px] text-gray-500 mb-4">All projects</p>
+          <div style={S.chartCard}>
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: "#181818", margin: "0 0 2px" }}>Project Status</h3>
+            <p style={{ fontSize: 11, color: "#6B7280", margin: "0 0 16px" }}>All projects</p>
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
@@ -663,11 +794,9 @@ function Dashboard({
       )}
 
       {costsByProject.length > 0 && (
-        <div className="sf-chart-card">
-          <h3 className="text-[13px] font-bold text-[#181818] mb-1">
-            Revenue vs Costs
-          </h3>
-          <p className="text-[11px] text-gray-500 mb-4">Per project comparison</p>
+        <div style={S.chartCard}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: "#181818", margin: "0 0 2px" }}>Revenue vs Costs</h3>
+          <p style={{ fontSize: 11, color: "#6B7280", margin: "0 0 16px" }}>Per project comparison</p>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={costsByProject} barCategoryGap="15%">
               <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#6B7280" }} axisLine={false} tickLine={false} />
@@ -735,49 +864,49 @@ function ForecastTab({
     .filter((d) => d.amount > 0);
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       {/* Gradient KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="sf-gradient-card" style={{ background: "linear-gradient(135deg, #032D60, #0176D3)" }}>
-          <p className="text-[11px] font-bold uppercase tracking-wider opacity-80 mb-2">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
+        <div style={S.gradientCard("linear-gradient(135deg, #032D60, #0176D3)")}>
+          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", opacity: 0.8, margin: "0 0 8px" }}>
             Open Pipeline
           </p>
-          <p className="text-2xl font-extrabold tracking-tight">{fmt(openPipeline)}</p>
-          <p className="text-xs opacity-60 mt-1">
+          <p style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em", margin: 0 }}>{fmt(openPipeline)}</p>
+          <p style={{ fontSize: 12, opacity: 0.6, margin: "4px 0 0" }}>
             {opportunities.length} opportunit{opportunities.length !== 1 ? "ies" : "y"}
           </p>
         </div>
-        <div className="sf-gradient-card" style={{ background: "linear-gradient(135deg, #1B5E20, #2E844A)" }}>
-          <p className="text-[11px] font-bold uppercase tracking-wider opacity-80 mb-2">
+        <div style={S.gradientCard("linear-gradient(135deg, #1B5E20, #2E844A)")}>
+          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", opacity: 0.8, margin: "0 0 8px" }}>
             Weighted Pipeline
           </p>
-          <p className="text-2xl font-extrabold tracking-tight">{fmt(weightedPipeline)}</p>
-          <p className="text-xs opacity-60 mt-1">Probability-adjusted</p>
+          <p style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em", margin: 0 }}>{fmt(weightedPipeline)}</p>
+          <p style={{ fontSize: 12, opacity: 0.6, margin: "4px 0 0" }}>Probability-adjusted</p>
         </div>
-        <div className="sf-gradient-card" style={{ background: "linear-gradient(135deg, #4A148C, #7526C4)" }}>
-          <p className="text-[11px] font-bold uppercase tracking-wider opacity-80 mb-2">
+        <div style={S.gradientCard("linear-gradient(135deg, #4A148C, #7526C4)")}>
+          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", opacity: 0.8, margin: "0 0 8px" }}>
             Forecasted Amount
           </p>
-          <p className="text-2xl font-extrabold tracking-tight">{fmt(forecastedAmount)}</p>
-          <p className="text-xs opacity-60 mt-1">
+          <p style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em", margin: 0 }}>{fmt(forecastedAmount)}</p>
+          <p style={{ fontSize: 12, opacity: 0.6, margin: "4px 0 0" }}>
             {forecastedOpps.length} deal{forecastedOpps.length !== 1 ? "s" : ""} in forecast
           </p>
         </div>
-        <div className="sf-gradient-card" style={{ background: "linear-gradient(135deg, #BF360C, #E87600)" }}>
-          <p className="text-[11px] font-bold uppercase tracking-wider opacity-80 mb-2">
+        <div style={S.gradientCard("linear-gradient(135deg, #BF360C, #E87600)")}>
+          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", opacity: 0.8, margin: "0 0 8px" }}>
             Weighted Forecast
           </p>
-          <p className="text-2xl font-extrabold tracking-tight">{fmt(weightedForecast)}</p>
-          <p className="text-xs opacity-60 mt-1">Forecast x probability</p>
+          <p style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em", margin: 0 }}>{fmt(weightedForecast)}</p>
+          <p style={{ fontSize: 12, opacity: 0.6, margin: "4px 0 0" }}>Forecast x probability</p>
         </div>
       </div>
 
       {/* Charts */}
       {opportunities.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="sf-chart-card">
-            <h3 className="text-[13px] font-bold text-[#181818] mb-1">Pipeline by Probability</h3>
-            <p className="text-[11px] text-gray-500 mb-4">Revenue grouped by win likelihood</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: 24 }}>
+          <div style={S.chartCard}>
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: "#181818", margin: "0 0 2px" }}>Pipeline by Probability</h3>
+            <p style={{ fontSize: 11, color: "#6B7280", margin: "0 0 16px" }}>Revenue grouped by win likelihood</p>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={pipelineByBand} barCategoryGap="20%">
                 <XAxis dataKey="band" tick={{ fontSize: 11, fill: "#6B7280" }} axisLine={false} tickLine={false} />
@@ -792,9 +921,9 @@ function ForecastTab({
             </ResponsiveContainer>
           </div>
 
-          <div className="sf-chart-card">
-            <h3 className="text-[13px] font-bold text-[#181818] mb-1">Pipeline by Vendor</h3>
-            <p className="text-[11px] text-gray-500 mb-4">Open opportunities breakdown</p>
+          <div style={S.chartCard}>
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: "#181818", margin: "0 0 2px" }}>Pipeline by Vendor</h3>
+            <p style={{ fontSize: 11, color: "#6B7280", margin: "0 0 16px" }}>Open opportunities breakdown</p>
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
                 <Pie
@@ -821,35 +950,35 @@ function ForecastTab({
       )}
 
       {/* Opportunities table */}
-      <div className="sf-card overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+      <div style={{ ...S.card, overflow: "hidden", padding: 0 }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <h3 className="text-[13px] font-bold text-[#181818]">Active Opportunities</h3>
-            <p className="text-[11px] text-gray-500">Tick &quot;Forecast&quot; to include in your committed forecast</p>
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: "#181818", margin: 0 }}>Active Opportunities</h3>
+            <p style={{ fontSize: 11, color: "#6B7280", margin: 0 }}>Tick &quot;Forecast&quot; to include in your committed forecast</p>
           </div>
-          <span className="text-xs font-semibold text-gray-400">
+          <span style={{ fontSize: 12, fontWeight: 600, color: "#9CA3AF" }}>
             {opportunities.length} record{opportunities.length !== 1 ? "s" : ""}
           </span>
         </div>
         {opportunities.length === 0 ? (
-          <div className="p-12 text-center">
-            <p className="text-sm text-gray-400">
+          <div style={{ padding: 48, textAlign: "center" }}>
+            <p style={{ fontSize: 14, color: "#9CA3AF", margin: 0 }}>
               No pending opportunities. Add a project with status &quot;Pending&quot; to see it here.
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full sf-table">
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  <th className="w-14 text-center">Forecast</th>
-                  <th>Client</th>
-                  <th>Vendor</th>
-                  <th>Type</th>
-                  <th className="text-right">Revenue</th>
-                  <th className="text-center">Probability</th>
-                  <th className="text-right">Weighted</th>
-                  <th className="w-16" />
+                  <th style={{ ...S.th, width: 56, textAlign: "center" }}>Forecast</th>
+                  <th style={S.th}>Client</th>
+                  <th style={S.th}>Vendor</th>
+                  <th style={S.th}>Type</th>
+                  <th style={{ ...S.th, textAlign: "right" }}>Revenue</th>
+                  <th style={{ ...S.th, textAlign: "center" }}>Probability</th>
+                  <th style={{ ...S.th, textAlign: "right" }}>Weighted</th>
+                  <th style={{ ...S.th, width: 64 }} />
                 </tr>
               </thead>
               <tbody>
@@ -857,46 +986,32 @@ function ForecastTab({
                   const weighted = p.revenue * ((p.probability ?? 0) / 100);
                   const prob = p.probability ?? 0;
                   return (
-                    <tr key={p.id}>
-                      <td className="text-center">
-                        <button
-                          onClick={() => onToggleForecast(p.id)}
-                          className={`w-[18px] h-[18px] rounded border-2 flex items-center justify-center transition mx-auto ${
-                            p.inForecast
-                              ? "bg-[#0176D3] border-[#0176D3] text-white"
-                              : "border-gray-300 hover:border-[#0176D3]"
-                          }`}
-                        >
-                          {p.inForecast && <IconCheck />}
-                        </button>
-                      </td>
-                      <td className="font-semibold text-[#181818]">{p.clientName}</td>
-                      <td>
-                        <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: VENDOR_COLORS[p.vendorType] }} />
-                        {VENDOR_LABELS[p.vendorType]}
-                      </td>
-                      <td className="text-gray-500">{p.projectType || "—"}</td>
-                      <td className="text-right font-mono font-semibold">{fmt(p.revenue)}</td>
-                      <td>
-                        <div className="flex items-center gap-2 justify-center">
-                          <div className="w-14 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                            <div
-                              className="h-full rounded-full"
-                              style={{
-                                width: `${prob}%`,
-                                background: prob >= 75 ? "#2E844A" : prob >= 50 ? "#0176D3" : prob >= 25 ? "#E87600" : "#C23934",
-                              }}
-                            />
-                          </div>
-                          <span className="text-xs font-semibold text-gray-600 w-7 text-right">{prob}%</span>
+                    <tr key={p.id} style={{ transition: "background 0.1s" }} onMouseEnter={e => (e.currentTarget.style.background = "#F0F7FF")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <td style={{ ...S.td, textAlign: "center" }}>
+                        <div style={{ display: "flex", justifyContent: "center" }}>
+                          <Checkbox checked={!!p.inForecast} onChange={() => onToggleForecast(p.id)} />
                         </div>
                       </td>
-                      <td className="text-right font-mono text-gray-500">{fmt(weighted)}</td>
-                      <td className="text-right">
-                        <button
-                          onClick={() => onEdit(p.id)}
-                          className="text-[#0176D3] hover:text-[#014486] text-xs font-semibold"
-                        >
+                      <td style={{ ...S.td, fontWeight: 600, color: "#181818" }}>{p.clientName}</td>
+                      <td style={S.td}><VendorDot vendor={p.vendorType} />{VENDOR_LABELS[p.vendorType]}</td>
+                      <td style={{ ...S.td, color: "#6B7280" }}>{p.projectType || "—"}</td>
+                      <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{fmt(p.revenue)}</td>
+                      <td style={{ ...S.td, textAlign: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+                          <div style={{ width: 56, height: 6, background: "#E5E7EB", borderRadius: 9999, overflow: "hidden" }}>
+                            <div style={{
+                              height: "100%",
+                              borderRadius: 9999,
+                              width: `${prob}%`,
+                              background: prob >= 75 ? "#2E844A" : prob >= 50 ? "#0176D3" : prob >= 25 ? "#E87600" : "#C23934",
+                            }} />
+                          </div>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", width: 28, textAlign: "right" }}>{prob}%</span>
+                        </div>
+                      </td>
+                      <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace", color: "#6B7280" }}>{fmt(weighted)}</td>
+                      <td style={{ ...S.td, textAlign: "right" }}>
+                        <button onClick={() => onEdit(p.id)} style={{ color: "#0176D3", fontSize: 12, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>
                           Edit
                         </button>
                       </td>
@@ -954,10 +1069,23 @@ function ProjectsTable({
     setTimeout(() => setReminderResult(null), 4000);
   }
 
+  const filterBtnStyle = (active: boolean): CSSProperties => ({
+    padding: "8px 16px",
+    fontSize: 12,
+    fontWeight: 600,
+    borderRadius: 6,
+    border: active ? "none" : "1px solid #E5E7EB",
+    background: active ? "#0176D3" : "white",
+    color: active ? "white" : "#6B7280",
+    cursor: "pointer",
+    transition: "all 0.15s",
+    boxShadow: active ? "0 1px 2px rgba(0,0,0,0.1)" : "none",
+  });
+
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Filters */}
-      <div className="flex items-center gap-2">
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {(
           [
             ["all", "All Projects"],
@@ -965,112 +1093,86 @@ function ProjectsTable({
             ["won_not_invoiced", "Won – Not Invoiced"],
           ] as [ProjectFilter, string][]
         ).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => onFilterChange(key)}
-            className={`px-4 py-2 text-xs font-semibold rounded-md transition ${
-              filter === key
-                ? "bg-[#0176D3] text-white shadow-sm"
-                : "bg-white text-gray-600 border border-gray-200 hover:border-[#0176D3] hover:text-[#0176D3]"
-            }`}
-          >
+          <button key={key} onClick={() => onFilterChange(key)} style={filterBtnStyle(filter === key)}>
             {label}
           </button>
         ))}
-        <span className="ml-auto text-xs text-gray-400 font-medium">
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#9CA3AF", fontWeight: 500 }}>
           {projects.length} record{projects.length !== 1 ? "s" : ""}
         </span>
       </div>
 
       {projects.length === 0 ? (
-        <div className="sf-card p-12 text-center">
-          <p className="text-sm text-gray-400">No projects match this filter.</p>
+        <div style={{ ...S.card, padding: 48, textAlign: "center" }}>
+          <p style={{ fontSize: 14, color: "#9CA3AF", margin: 0 }}>No projects match this filter.</p>
         </div>
       ) : (
-        <div className="sf-card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full sf-table">
+        <div style={{ ...S.card, overflow: "hidden", padding: 0 }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  <th>Client</th>
-                  <th>Vendor</th>
-                  <th>Type</th>
-                  <th>Source</th>
-                  <th>Status</th>
-                  <th className="text-right">Revenue</th>
-                  <th className="text-right">Costs</th>
-                  <th className="text-right">Invoiced</th>
-                  <th>Invoices</th>
-                  <th className="w-28" />
+                  <th style={S.th}>Client</th>
+                  <th style={S.th}>Vendor</th>
+                  <th style={S.th}>Type</th>
+                  <th style={S.th}>Source</th>
+                  <th style={S.th}>Status</th>
+                  <th style={{ ...S.th, textAlign: "right" }}>Revenue</th>
+                  <th style={{ ...S.th, textAlign: "right" }}>Costs</th>
+                  <th style={{ ...S.th, textAlign: "right" }}>Invoiced</th>
+                  <th style={S.th}>Invoices</th>
+                  <th style={{ ...S.th, width: 112 }} />
                 </tr>
               </thead>
               <tbody>
                 {projects.map((p) => {
                   const costs = totalCosts(p);
                   const invoiced = totalInvoiced(p);
-                  const scfg = STATUS_CFG[p.status];
                   return (
-                    <tr key={p.id}>
-                      <td className="font-semibold text-[#181818]">{p.clientName}</td>
-                      <td>
-                        <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: VENDOR_COLORS[p.vendorType] }} />
-                        {VENDOR_LABELS[p.vendorType]}
-                      </td>
-                      <td className="text-gray-500">{p.projectType || "—"}</td>
-                      <td className="text-gray-500">
+                    <tr key={p.id} style={{ transition: "background 0.1s" }} onMouseEnter={e => (e.currentTarget.style.background = "#F0F7FF")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <td style={{ ...S.td, fontWeight: 600, color: "#181818" }}>{p.clientName}</td>
+                      <td style={S.td}><VendorDot vendor={p.vendorType} />{VENDOR_LABELS[p.vendorType]}</td>
+                      <td style={{ ...S.td, color: "#6B7280" }}>{p.projectType || "—"}</td>
+                      <td style={{ ...S.td, color: "#6B7280" }}>
                         {p.leadSource ? LEAD_SOURCE_LABELS[p.leadSource] ?? p.leadSource : "—"}
                       </td>
-                      <td>
-                        <span className={`sf-badge ${scfg.bg} ${scfg.text}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${scfg.dot}`} />
-                          {p.status.charAt(0).toUpperCase() + p.status.slice(1)}
-                        </span>
-                      </td>
-                      <td className="text-right font-mono font-semibold">{fmt(p.revenue)}</td>
-                      <td className="text-right font-mono text-[#C23934]">
+                      <td style={S.td}><StatusBadge status={p.status} /></td>
+                      <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{fmt(p.revenue)}</td>
+                      <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace", color: "#C23934" }}>
                         {costs > 0 ? fmt(costs) : "—"}
                       </td>
-                      <td className="text-right font-mono">{invoiced > 0 ? fmt(invoiced) : "—"}</td>
-                      <td>
+                      <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace" }}>{invoiced > 0 ? fmt(invoiced) : "—"}</td>
+                      <td style={S.td}>
                         {(() => {
                           const due = getDueInvoices(p);
                           return p.invoices.length > 0 ? (
-                            <div className="flex items-center gap-1.5">
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                               <span title={p.invoices.map((i) => `${i.date} (${i.status}) Net ${i.netDays ?? 30}`).join(", ")}>
                                 {p.invoices.length}
                               </span>
                               {due.length > 0 && (
-                                <span className="sf-badge bg-[#FDE8E8] text-[#C23934]">
+                                <span style={S.badge("#FDE8E8", "#C23934")}>
                                   {due.length} due
                                 </span>
                               )}
                             </div>
                           ) : (
-                            <span className="text-gray-300">—</span>
+                            <span style={{ color: "#D1D5DB" }}>—</span>
                           );
                         })()}
                       </td>
-                      <td className="text-right">
-                        <div className="flex flex-col gap-1 items-end">
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => onEdit(p.id)}
-                              className="text-[#0176D3] hover:text-[#014486] text-xs font-semibold"
-                            >
+                      <td style={{ ...S.td, textAlign: "right" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button onClick={() => onEdit(p.id)} style={{ color: "#0176D3", fontSize: 12, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>
                               Edit
                             </button>
                             {confirmDelete === p.id ? (
-                              <button
-                                onClick={() => { onDelete(p.id); setConfirmDelete(null); }}
-                                className="text-[#C23934] text-xs font-semibold"
-                              >
+                              <button onClick={() => { onDelete(p.id); setConfirmDelete(null); }} style={{ color: "#C23934", fontSize: 12, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>
                                 Confirm?
                               </button>
                             ) : (
-                              <button
-                                onClick={() => setConfirmDelete(p.id)}
-                                className="text-gray-400 hover:text-[#C23934] text-xs font-semibold"
-                              >
+                              <button onClick={() => setConfirmDelete(p.id)} style={{ color: "#9CA3AF", fontSize: 12, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>
                                 Del
                               </button>
                             )}
@@ -1078,16 +1180,21 @@ function ProjectsTable({
                           {getDueInvoices(p).map((inv) => {
                             const key = `${p.id}-${inv.id}`;
                             return (
-                              <div key={inv.id} className="flex items-center gap-1">
+                              <div key={inv.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                                 <button
                                   onClick={() => handleSendReminder(p, inv)}
                                   disabled={sendingReminder === key}
-                                  className="text-[10px] px-2 py-0.5 rounded bg-[#FDE8E8] text-[#C23934] hover:bg-[#FACFCF] font-semibold disabled:opacity-50 transition whitespace-nowrap"
+                                  style={{
+                                    fontSize: 10, padding: "2px 8px", borderRadius: 4,
+                                    background: "#FDE8E8", color: "#C23934", border: "none",
+                                    cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap",
+                                    opacity: sendingReminder === key ? 0.5 : 1,
+                                  }}
                                 >
                                   {sendingReminder === key ? "Sending…" : `Remind ${inv.date}`}
                                 </button>
                                 {reminderResult?.id === key && (
-                                  <span className={`text-[10px] font-semibold ${reminderResult.success ? "text-[#2E844A]" : "text-[#C23934]"}`}>
+                                  <span style={{ fontSize: 10, fontWeight: 600, color: reminderResult.success ? "#2E844A" : "#C23934" }}>
                                     {reminderResult.message}
                                   </span>
                                 )}
@@ -1171,59 +1278,68 @@ function ProjectForm({
     });
   }
 
-  const inputCls = "w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-[#0176D3] focus:ring-2 focus:ring-[#0176D3]/20 outline-none transition";
-  const labelCls = "block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5";
+  const labelStyle: CSSProperties = {
+    display: "block",
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#6B7280",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    marginBottom: 6,
+  };
 
   return (
-    <form onSubmit={handleSubmit} className="sf-card p-6 space-y-6 max-w-3xl animate-fade-in">
-      <div className="flex items-center gap-3 pb-2 border-b border-gray-100">
-        <div className="w-8 h-8 rounded-lg bg-[#EEF4FF] flex items-center justify-center">
-          <svg className="w-4 h-4 text-[#0176D3]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
+    <form onSubmit={handleSubmit} style={{ ...S.card, padding: 24, maxWidth: 720, display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, paddingBottom: 8, borderBottom: "1px solid #F3F4F6" }}>
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: "#EEF4FF", display: "flex", alignItems: "center", justifyContent: "center", color: "#0176D3" }}>
+          <IconPlus />
         </div>
-        <h2 className="text-sm font-bold text-[#181818]">
+        <h2 style={{ fontSize: 14, fontWeight: 700, color: "#181818", margin: 0 }}>
           {existing ? "Edit Project" : "New Project"}
         </h2>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Row: Client + Vendor */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div>
-          <label className={labelCls}>Client Name</label>
-          <input type="text" required value={clientName} onChange={(e) => setClientName(e.target.value)} className={inputCls} placeholder="Acme Corp" />
+          <label style={labelStyle}>Client Name</label>
+          <input type="text" required value={clientName} onChange={(e) => setClientName(e.target.value)} style={S.input} placeholder="Acme Corp" />
         </div>
         <div>
-          <label className={labelCls}>Vendor</label>
-          <select value={vendorType} onChange={(e) => setVendorType(e.target.value as VendorType)} className={inputCls}>
+          <label style={labelStyle}>Vendor</label>
+          <select value={vendorType} onChange={(e) => setVendorType(e.target.value as VendorType)} style={S.input}>
             {Object.entries(VENDOR_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Row: Project Type + Lead Source */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div>
-          <label className={labelCls}>Project Type</label>
-          <select value={projectType} onChange={(e) => setProjectType(e.target.value)} className={inputCls}>
+          <label style={labelStyle}>Project Type</label>
+          <select value={projectType} onChange={(e) => setProjectType(e.target.value)} style={S.input}>
             <option value="">Select type…</option>
             {VENDOR_PROJECT_TYPES[vendorType].map((pt) => <option key={pt} value={pt}>{pt}</option>)}
           </select>
         </div>
         <div>
-          <label className={labelCls}>Lead Source</label>
-          <select value={leadSource} onChange={(e) => setLeadSource(e.target.value as LeadSource)} className={inputCls}>
+          <label style={labelStyle}>Lead Source</label>
+          <select value={leadSource} onChange={(e) => setLeadSource(e.target.value as LeadSource)} style={S.input}>
             {Object.entries(LEAD_SOURCE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Row: Revenue + Status */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div>
-          <label className={labelCls}>Revenue ($)</label>
-          <input type="number" required min="0" step="0.01" value={revenue} onChange={(e) => setRevenue(e.target.value)} className={inputCls} placeholder="100,000" />
+          <label style={labelStyle}>Revenue ($)</label>
+          <input type="number" required min="0" step="0.01" value={revenue} onChange={(e) => setRevenue(e.target.value)} style={S.input} placeholder="100,000" />
         </div>
         <div>
-          <label className={labelCls}>Status</label>
-          <select value={status} onChange={(e) => setStatus(e.target.value as ProjectStatus)} className={inputCls}>
+          <label style={labelStyle}>Status</label>
+          <select value={status} onChange={(e) => setStatus(e.target.value as ProjectStatus)} style={S.input}>
             <option value="won">Won</option>
             <option value="pending">Pending</option>
             <option value="lost">Lost</option>
@@ -1231,63 +1347,56 @@ function ProjectForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Row: Probability + Forecast */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div>
-          <label className={labelCls}>Probability (%)</label>
-          <input type="number" min="0" max="100" value={probability} onChange={(e) => setProbability(e.target.value)} className={inputCls} />
+          <label style={labelStyle}>Probability (%)</label>
+          <input type="number" min="0" max="100" value={probability} onChange={(e) => setProbability(e.target.value)} style={S.input} />
         </div>
-        <div className="flex items-end pb-2">
-          <label className="flex items-center gap-2.5 cursor-pointer select-none">
-            <button
-              type="button"
-              onClick={() => setInForecast(!inForecast)}
-              className={`w-[18px] h-[18px] rounded border-2 flex items-center justify-center transition ${
-                inForecast ? "bg-[#0176D3] border-[#0176D3] text-white" : "border-gray-300 hover:border-[#0176D3]"
-              }`}
-            >
-              {inForecast && <IconCheck />}
-            </button>
-            <span className="text-sm font-medium text-gray-700">Include in Forecast</span>
+        <div style={{ display: "flex", alignItems: "flex-end", paddingBottom: 8 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
+            <Checkbox checked={inForecast} onChange={() => setInForecast(!inForecast)} />
+            <span style={{ fontSize: 14, fontWeight: 500, color: "#374151" }}>Include in Forecast</span>
           </label>
         </div>
       </div>
 
       {/* Costs */}
       <section>
-        <div className="flex items-center justify-between mb-2">
-          <label className={labelCls}>Known Costs</label>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <label style={labelStyle}>Known Costs</label>
           <button
             type="button"
             onClick={() => setCosts([...costs, { id: uid(), description: "", amount: 0 }])}
-            className="text-xs font-semibold text-[#0176D3] hover:text-[#014486] px-2 py-1 rounded hover:bg-[#EEF4FF] transition"
+            style={{ fontSize: 12, fontWeight: 600, color: "#0176D3", background: "none", border: "none", cursor: "pointer", padding: "4px 8px", borderRadius: 4 }}
           >
             + Add Cost
           </button>
         </div>
-        {costs.length === 0 && <p className="text-xs text-gray-400">No costs added.</p>}
-        <div className="space-y-2">
+        {costs.length === 0 && <p style={{ fontSize: 12, color: "#9CA3AF", margin: 0 }}>No costs added.</p>}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {costs.map((c) => (
-            <div key={c.id} className="flex gap-2 items-center">
+            <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input
                 type="text"
                 placeholder="Description"
                 value={c.description}
                 onChange={(e) => setCosts(costs.map((x) => x.id === c.id ? { ...x, description: e.target.value } : x))}
-                className={`${inputCls} flex-1`}
+                style={{ ...S.input, flex: 1 }}
               />
-              <div className="relative w-32">
-                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+              <div style={{ position: "relative", width: 128 }}>
+                <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#9CA3AF", fontSize: 12 }}>$</span>
                 <input
                   type="number"
                   min="0"
                   step="0.01"
                   value={c.amount || ""}
                   onChange={(e) => setCosts(costs.map((x) => x.id === c.id ? { ...x, amount: parseFloat(e.target.value) || 0 } : x))}
-                  className={`${inputCls} pl-6`}
+                  style={{ ...S.input, paddingLeft: 24 }}
                 />
               </div>
-              <button type="button" onClick={() => setCosts(costs.filter((x) => x.id !== c.id))} className="text-gray-400 hover:text-[#C23934] p-1 transition">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button type="button" onClick={() => setCosts(costs.filter((x) => x.id !== c.id))} style={{ color: "#9CA3AF", background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+                <IconX />
               </button>
             </div>
           ))}
@@ -1296,53 +1405,57 @@ function ProjectForm({
 
       {/* Invoices */}
       <section>
-        <div className="mb-3">
-          <label className={labelCls}>Number of Invoices</label>
-          <input type="number" min="0" max="50" value={invoiceCount} onChange={(e) => setInvoiceCount(e.target.value)} className={`${inputCls} w-24`} />
+        <div style={{ marginBottom: 12 }}>
+          <label style={labelStyle}>Number of Invoices</label>
+          <input type="number" min="0" max="50" value={invoiceCount} onChange={(e) => setInvoiceCount(e.target.value)} style={{ ...S.input, width: 96 }} />
         </div>
         {invoices.length > 0 && (
-          <div className="space-y-2">
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {invoices.map((inv, idx) => (
-              <div key={inv.id} className="flex flex-wrap gap-3 items-center bg-[#FAFBFC] rounded-lg p-3 border border-gray-100">
-                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider w-16">
+              <div key={inv.id} style={{
+                display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center",
+                background: "#FAFBFC", borderRadius: 8, padding: 12,
+                border: "1px solid #F3F4F6",
+              }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.05em", width: 64 }}>
                   Inv {idx + 1}
                 </span>
                 <div>
-                  <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Date</label>
+                  <label style={{ display: "block", fontSize: 10, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Date</label>
                   <input
                     type="date"
                     value={inv.date}
                     onChange={(e) => setInvoices(invoices.map((x) => x.id === inv.id ? { ...x, date: e.target.value } : x))}
-                    className={`${inputCls} w-auto`}
+                    style={S.input}
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Amount</label>
+                  <label style={{ display: "block", fontSize: 10, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Amount</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={inv.amount || ""}
                     onChange={(e) => setInvoices(invoices.map((x) => x.id === inv.id ? { ...x, amount: parseFloat(e.target.value) || 0 } : x))}
-                    className={`${inputCls} w-28`}
+                    style={{ ...S.input, width: 112 }}
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Net Days</label>
+                  <label style={{ display: "block", fontSize: 10, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Net Days</label>
                   <select
                     value={inv.netDays ?? 30}
                     onChange={(e) => setInvoices(invoices.map((x) => x.id === inv.id ? { ...x, netDays: parseInt(e.target.value) as NetDays } : x))}
-                    className={`${inputCls} w-24`}
+                    style={{ ...S.input, width: 96 }}
                   >
                     {NET_DAYS_OPTIONS.map((d) => <option key={d} value={d}>Net {d}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Status</label>
+                  <label style={{ display: "block", fontSize: 10, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Status</label>
                   <select
                     value={inv.status}
                     onChange={(e) => setInvoices(invoices.map((x) => x.id === inv.id ? { ...x, status: e.target.value as Invoice["status"] } : x))}
-                    className={`${inputCls} w-28`}
+                    style={{ ...S.input, width: 112 }}
                   >
                     <option value="pending">Pending</option>
                     <option value="sent">Sent</option>
@@ -1356,11 +1469,26 @@ function ProjectForm({
       </section>
 
       {/* Actions */}
-      <div className="flex gap-3 pt-3 border-t border-gray-100">
-        <button type="submit" className="bg-[#0176D3] hover:bg-[#014486] text-white text-sm font-semibold px-6 py-2.5 rounded-md transition shadow-sm">
+      <div style={{ display: "flex", gap: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6" }}>
+        <button
+          type="submit"
+          style={{
+            background: "#0176D3", color: "white", fontSize: 14, fontWeight: 600,
+            padding: "10px 24px", borderRadius: 6, border: "none", cursor: "pointer",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+          }}
+        >
           {existing ? "Update Project" : "Save Project"}
         </button>
-        <button type="button" onClick={onCancel} className="bg-white border border-gray-300 text-gray-700 text-sm font-semibold px-6 py-2.5 rounded-md hover:bg-gray-50 transition">
+        <button
+          type="button"
+          onClick={onCancel}
+          style={{
+            background: "white", color: "#374151", fontSize: 14, fontWeight: 600,
+            padding: "10px 24px", borderRadius: 6, border: "1px solid #D1D5DB",
+            cursor: "pointer",
+          }}
+        >
           Cancel
         </button>
       </div>
