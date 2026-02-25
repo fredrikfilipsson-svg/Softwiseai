@@ -4,10 +4,15 @@ export interface Cost {
   amount: number;
 }
 
+export type NetDays = 15 | 30 | 45 | 60 | 90;
+
+export const NET_DAYS_OPTIONS: NetDays[] = [15, 30, 45, 60, 90];
+
 export interface Invoice {
   id: string;
   date: string;
   amount: number;
+  netDays: NetDays;
   status: "pending" | "sent" | "paid";
 }
 
@@ -67,6 +72,8 @@ export interface FinanceProject {
   invoiceCount: number;
   invoices: Invoice[];
   status: ProjectStatus;
+  probability: number; // 0-100
+  inForecast: boolean;
   createdAt: string;
 }
 

@@ -19,11 +19,13 @@ import {
   Cost,
   Invoice,
   VendorType,
+  NetDays,
   ProjectStatus,
   LeadSource,
   VENDOR_LABELS,
   VENDOR_PROJECT_TYPES,
   LEAD_SOURCE_LABELS,
+  NET_DAYS_OPTIONS,
   YearlyTarget,
 } from "@/lib/finance-types";
 import {
@@ -100,7 +102,7 @@ const STATUS_BADGES: Record<ProjectStatus, string> = {
 };
 
 // ── tab types ───────────────────────────────────────────────
-type Tab = "dashboard" | "projects" | "add";
+type Tab = "dashboard" | "projects" | "forecast" | "add";
 type ProjectFilter = "all" | "won" | "won_not_invoiced";
 
 // ═══════════════════════════════════════════════════════════
@@ -213,6 +215,14 @@ export default function FinancePage() {
     saveYearlyTarget(t);
   }
 
+  function handleToggleForecast(id: string) {
+    persist(
+      projects.map((p) =>
+        p.id === id ? { ...p, inForecast: !p.inForecast } : p
+      )
+    );
+  }
+
   if (!loaded) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -251,6 +261,7 @@ export default function FinancePage() {
             [
               ["dashboard", "Dashboard"],
               ["projects", "Projects"],
+              ["forecast", "Forecast"],
               ["add", editingId ? "Edit Project" : "Add Project"],
             ] as [Tab, string][]
           ).map(([key, label]) => (
@@ -298,6 +309,14 @@ export default function FinancePage() {
             onFilterChange={setFilter}
             onEdit={handleEdit}
             onDelete={handleDelete}
+          />
+        )}
+
+        {tab === "forecast" && (
+          <ForecastTab
+            projects={projects}
+            onToggleForecast={handleToggleForecast}
+            onEdit={handleEdit}
           />
         )}
 
@@ -602,6 +621,269 @@ function KpiCard({
 }
 
 // ═══════════════════════════════════════════════════════════
+// FORECAST TAB
+// ═══════════════════════════════════════════════════════════
+function ForecastTab({
+  projects,
+  onToggleForecast,
+  onEdit,
+}: {
+  projects: FinanceProject[];
+  onToggleForecast: (id: string) => void;
+  onEdit: (id: string) => void;
+}) {
+  // Active opportunities = pending status
+  const opportunities = projects.filter((p) => p.status === "pending");
+  const forecastedOpps = opportunities.filter((p) => p.inForecast);
+
+  const openPipeline = opportunities.reduce((s, p) => s + p.revenue, 0);
+  const weightedPipeline = opportunities.reduce(
+    (s, p) => s + p.revenue * ((p.probability ?? 0) / 100),
+    0
+  );
+  const forecastedAmount = forecastedOpps.reduce((s, p) => s + p.revenue, 0);
+  const weightedForecast = forecastedOpps.reduce(
+    (s, p) => s + p.revenue * ((p.probability ?? 0) / 100),
+    0
+  );
+
+  // Chart: pipeline by probability band
+  const bands = [
+    { label: "0-25%", min: 0, max: 25, color: "#ef4444" },
+    { label: "26-50%", min: 26, max: 50, color: "#f59e0b" },
+    { label: "51-75%", min: 51, max: 75, color: "#3b82f6" },
+    { label: "76-100%", min: 76, max: 100, color: "#10b981" },
+  ];
+  const pipelineByBand = bands.map((b) => ({
+    band: b.label,
+    amount: opportunities
+      .filter((p) => (p.probability ?? 0) >= b.min && (p.probability ?? 0) <= b.max)
+      .reduce((s, p) => s + p.revenue, 0),
+    fill: b.color,
+  }));
+
+  // Chart: pipeline by vendor
+  const pipelineByVendor = Object.keys(VENDOR_LABELS)
+    .map((v) => ({
+      vendor: VENDOR_LABELS[v as VendorType],
+      amount: opportunities
+        .filter((p) => p.vendorType === v)
+        .reduce((s, p) => s + p.revenue, 0),
+      fill: VENDOR_COLORS[v as VendorType],
+    }))
+    .filter((d) => d.amount > 0);
+
+  return (
+    <div className="space-y-8">
+      {/* KPI row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-5 shadow-sm text-white">
+          <p className="text-xs font-medium uppercase tracking-wider opacity-80 mb-1">
+            Open Pipeline
+          </p>
+          <p className="text-2xl font-bold">{fmt(openPipeline)}</p>
+          <p className="text-sm opacity-70 mt-1">
+            {opportunities.length} opportunit{opportunities.length !== 1 ? "ies" : "y"}
+          </p>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-5 shadow-sm text-white">
+          <p className="text-xs font-medium uppercase tracking-wider opacity-80 mb-1">
+            Weighted Pipeline
+          </p>
+          <p className="text-2xl font-bold">{fmt(weightedPipeline)}</p>
+          <p className="text-sm opacity-70 mt-1">Probability-adjusted</p>
+        </div>
+        <div className="bg-gradient-to-br from-violet-500 to-violet-600 rounded-xl p-5 shadow-sm text-white">
+          <p className="text-xs font-medium uppercase tracking-wider opacity-80 mb-1">
+            Forecasted Amount
+          </p>
+          <p className="text-2xl font-bold">{fmt(forecastedAmount)}</p>
+          <p className="text-sm opacity-70 mt-1">
+            {forecastedOpps.length} deal{forecastedOpps.length !== 1 ? "s" : ""} in forecast
+          </p>
+        </div>
+        <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl p-5 shadow-sm text-white">
+          <p className="text-xs font-medium uppercase tracking-wider opacity-80 mb-1">
+            Weighted Forecast
+          </p>
+          <p className="text-2xl font-bold">{fmt(weightedForecast)}</p>
+          <p className="text-sm opacity-70 mt-1">Forecast x probability</p>
+        </div>
+      </div>
+
+      {/* Charts */}
+      {opportunities.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <section className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+            <h3 className="text-sm font-semibold text-gray-700 mb-4">
+              Pipeline by Probability
+            </h3>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={pipelineByBand}>
+                <XAxis dataKey="band" tick={{ fontSize: 12 }} />
+                <YAxis
+                  tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
+                  tick={{ fontSize: 12 }}
+                />
+                <Tooltip
+                  formatter={(v) => fmt(Number(v ?? 0))}
+                  labelStyle={{ fontWeight: 600 }}
+                />
+                <Bar dataKey="amount" name="Pipeline" radius={[6, 6, 0, 0]}>
+                  {pipelineByBand.map((d, i) => (
+                    <Cell key={i} fill={d.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </section>
+
+          <section className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+            <h3 className="text-sm font-semibold text-gray-700 mb-4">
+              Pipeline by Vendor
+            </h3>
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie
+                  data={pipelineByVendor}
+                  dataKey="amount"
+                  nameKey="vendor"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={95}
+                  innerRadius={45}
+                  paddingAngle={3}
+                  label={({ name, value }) =>
+                    `${name ?? ""} ${fmt(Number(value ?? 0))}`
+                  }
+                >
+                  {pipelineByVendor.map((d, i) => (
+                    <Cell key={i} fill={d.fill} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(v) => fmt(Number(v ?? 0))} />
+              </PieChart>
+            </ResponsiveContainer>
+          </section>
+        </div>
+      )}
+
+      {/* Opportunities Table */}
+      <section className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <h3 className="text-sm font-semibold text-gray-700">
+            Active Opportunities
+          </h3>
+        </div>
+        {opportunities.length === 0 ? (
+          <div className="p-12 text-center">
+            <p className="text-gray-400">
+              No pending opportunities. Add a project with status
+              &quot;Pending&quot; to see it here.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 w-10">Forecast</th>
+                  <th className="px-4 py-3">Client</th>
+                  <th className="px-4 py-3">Vendor</th>
+                  <th className="px-4 py-3">Project Type</th>
+                  <th className="px-4 py-3 text-right">Revenue</th>
+                  <th className="px-4 py-3 text-center">Probability</th>
+                  <th className="px-4 py-3 text-right">Weighted</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {opportunities.map((p) => {
+                  const weighted = p.revenue * ((p.probability ?? 0) / 100);
+                  return (
+                    <tr
+                      key={p.id}
+                      className={`hover:bg-gray-50 transition ${p.inForecast ? "bg-violet-50/40" : ""}`}
+                    >
+                      <td className="px-4 py-3 text-center">
+                        <button
+                          onClick={() => onToggleForecast(p.id)}
+                          className={`w-5 h-5 rounded border-2 flex items-center justify-center transition ${
+                            p.inForecast
+                              ? "bg-violet-500 border-violet-500 text-white"
+                              : "border-gray-300 hover:border-violet-400"
+                          }`}
+                        >
+                          {p.inForecast && (
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 font-medium text-gray-800">
+                        {p.clientName}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className="inline-block w-2.5 h-2.5 rounded-full mr-2"
+                          style={{ backgroundColor: VENDOR_COLORS[p.vendorType] }}
+                        />
+                        {VENDOR_LABELS[p.vendorType]}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {p.projectType || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono">
+                        {fmt(p.revenue)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2 justify-center">
+                          <div className="w-16 bg-gray-200 rounded-full h-2 overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${p.probability ?? 0}%`,
+                                background:
+                                  (p.probability ?? 0) >= 75
+                                    ? "#10b981"
+                                    : (p.probability ?? 0) >= 50
+                                      ? "#3b82f6"
+                                      : (p.probability ?? 0) >= 25
+                                        ? "#f59e0b"
+                                        : "#ef4444",
+                              }}
+                            />
+                          </div>
+                          <span className="text-xs font-medium text-gray-600 w-8 text-right">
+                            {p.probability ?? 0}%
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-500">
+                        {fmt(weighted)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => onEdit(p.id)}
+                          className="text-brand-600 hover:text-brand-700 text-xs font-medium"
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // PROJECTS TABLE
 // ═══════════════════════════════════════════════════════════
 function ProjectsTable({
@@ -744,7 +1026,7 @@ function ProjectsTable({
                           const due = getDueInvoices(p);
                           return p.invoices.length > 0 ? (
                             <div>
-                              <span title={p.invoices.map((i) => `${i.date} (${i.status})`).join(", ")}>
+                              <span title={p.invoices.map((i) => `${i.date} (${i.status}) Net ${i.netDays ?? 30}`).join(", ")}>
                                 {p.invoices.length} invoice
                                 {p.invoices.length !== 1 ? "s" : ""}
                               </span>
@@ -852,6 +1134,10 @@ function ProjectForm({
   const [status, setStatus] = useState<ProjectStatus>(
     existing?.status ?? "won"
   );
+  const [probability, setProbability] = useState(
+    existing?.probability?.toString() ?? "50"
+  );
+  const [inForecast, setInForecast] = useState(existing?.inForecast ?? false);
   const [costs, setCosts] = useState<Cost[]>(
     existing?.costs ?? []
   );
@@ -883,6 +1169,7 @@ function ProjectForm({
             id: uid(),
             date: "",
             amount: 0,
+            netDays: 30,
             status: "pending",
           });
         }
@@ -919,7 +1206,7 @@ function ProjectForm({
 
   function handleInvoiceChange(
     id: string,
-    field: "date" | "amount" | "status",
+    field: "date" | "amount" | "status" | "netDays",
     value: string
   ) {
     setInvoices(
@@ -928,7 +1215,11 @@ function ProjectForm({
           ? {
               ...inv,
               [field]:
-                field === "amount" ? parseFloat(value) || 0 : value,
+                field === "amount"
+                  ? parseFloat(value) || 0
+                  : field === "netDays"
+                    ? parseInt(value) || 30
+                    : value,
             }
           : inv
       )
@@ -950,6 +1241,8 @@ function ProjectForm({
       invoiceCount: parseInt(invoiceCount) || 0,
       invoices,
       status,
+      probability: parseInt(probability) || 0,
+      inForecast,
       createdAt: existing?.createdAt ?? new Date().toISOString(),
     };
     onSave(project);
@@ -1067,6 +1360,46 @@ function ProjectForm({
         </div>
       </div>
 
+      {/* Probability + Forecast */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Probability (%)
+          </label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            value={probability}
+            onChange={(e) => setProbability(e.target.value)}
+            className="input-field w-full"
+            placeholder="50"
+          />
+        </div>
+        <div className="flex items-end pb-1">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <button
+              type="button"
+              onClick={() => setInForecast(!inForecast)}
+              className={`w-5 h-5 rounded border-2 flex items-center justify-center transition ${
+                inForecast
+                  ? "bg-violet-500 border-violet-500 text-white"
+                  : "border-gray-300 hover:border-violet-400"
+              }`}
+            >
+              {inForecast && (
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </button>
+            <span className="text-sm font-medium text-gray-700">
+              Include in Forecast
+            </span>
+          </label>
+        </div>
+      </div>
+
       {/* Costs */}
       <section>
         <div className="flex items-center justify-between mb-2">
@@ -1178,6 +1511,24 @@ function ProjectForm({
                     }
                     className="input-field w-32 text-sm"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-0.5">
+                    Net Days
+                  </label>
+                  <select
+                    value={inv.netDays ?? 30}
+                    onChange={(e) =>
+                      handleInvoiceChange(inv.id, "netDays", e.target.value)
+                    }
+                    className="input-field text-sm"
+                  >
+                    {NET_DAYS_OPTIONS.map((d) => (
+                      <option key={d} value={d}>
+                        Net {d}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-0.5">
