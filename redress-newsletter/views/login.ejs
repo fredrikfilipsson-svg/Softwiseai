@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Login | Redress Compliance</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body class="login-page">
+  <div class="login-container">
+    <div class="login-brand">
+      <span class="brand-text-lg">REDRESS COMPLIANCE</span>
+      <div class="brand-underline-center"></div>
+      <p class="brand-tagline">Newsletter Administration</p>
+    </div>
+    <form class="login-form" method="POST" action="/admin/login">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <% if (error) { %>
+        <div class="alert alert-error"><%= error %></div>
+      <% } %>
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required autocomplete="email" placeholder="admin@redresscompliance.com">
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Enter your password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+    </form>
+    <div class="login-footer">
+      <p>Redress Compliance LLC | Independent Enterprise Software Licensing Advisory</p>
+    </div>
+  </div>
+</body>
+</html>

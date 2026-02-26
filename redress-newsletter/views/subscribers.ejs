@@ -1,0 +1,164 @@
+<%- include('partials/header') %>
+<%- include('partials/sidebar') %>
+    <main class="main-content">
+      <div class="page-header">
+        <h1>Subscribers</h1>
+        <div class="page-actions">
+          <button class="btn btn-secondary" onclick="openModal('addModal')">Add Subscriber</button>
+          <button class="btn btn-secondary" onclick="openModal('importModal')">Import CSV</button>
+          <a href="/admin/subscribers/export" class="btn btn-secondary">Export CSV</a>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filters-bar">
+        <form method="GET" action="/admin/subscribers" class="filters-form">
+          <input type="text" name="search" class="form-control" placeholder="Search by email or name..." value="<%= filters.search || '' %>">
+          <select name="status" class="form-control">
+            <option value="">All Statuses</option>
+            <option value="active" <%= filters.status === 'active' ? 'selected' : '' %>>Active</option>
+            <option value="pending" <%= filters.status === 'pending' ? 'selected' : '' %>>Pending</option>
+            <option value="unsubscribed" <%= filters.status === 'unsubscribed' ? 'selected' : '' %>>Unsubscribed</option>
+          </select>
+          <select name="source" class="form-control">
+            <option value="">All Sources</option>
+            <option value="manual" <%= filters.source === 'manual' ? 'selected' : '' %>>Manual</option>
+            <option value="widget" <%= filters.source === 'widget' ? 'selected' : '' %>>Widget</option>
+            <option value="landing-page" <%= filters.source === 'landing-page' ? 'selected' : '' %>>Landing Page</option>
+            <option value="import" <%= filters.source === 'import' ? 'selected' : '' %>>Import</option>
+          </select>
+          <button type="submit" class="btn btn-primary">Filter</button>
+          <% if (filters.search || filters.status || filters.source) { %>
+            <a href="/admin/subscribers" class="btn btn-secondary">Clear</a>
+          <% } %>
+        </form>
+      </div>
+
+      <div class="table-info">
+        <span>Showing <%= subscribers.length %> of <%= total %> subscribers (Page <%= page %> of <%= totalPages %>)</span>
+      </div>
+
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Name</th>
+              <th>Status</th>
+              <th>Source</th>
+              <th>Subscribed</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (subscribers.length === 0) { %>
+              <tr><td colspan="6" class="text-center text-muted">No subscribers found.</td></tr>
+            <% } %>
+            <% subscribers.forEach(function(sub) { %>
+              <tr>
+                <td><%= sub.email %></td>
+                <td><%= sub.name || '—' %></td>
+                <td>
+                  <span class="badge badge-<%= sub.status === 'active' ? 'success' : sub.status === 'pending' ? 'warning' : 'danger' %>">
+                    <%= sub.status %>
+                  </span>
+                </td>
+                <td><span class="badge badge-neutral"><%= sub.source %></span></td>
+                <td><%= sub.subscribed_at ? new Date(sub.subscribed_at).toLocaleDateString() : '—' %></td>
+                <td>
+                  <button class="btn btn-sm btn-danger" onclick="deleteSubscriber(<%= sub.id %>, '<%= sub.email %>')">Delete</button>
+                </td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <% if (totalPages > 1) { %>
+      <div class="pagination">
+        <% if (page > 1) { %>
+          <a href="/admin/subscribers?page=<%= page - 1 %><%= filters.status ? '&status=' + filters.status : '' %><%= filters.source ? '&source=' + filters.source : '' %><%= filters.search ? '&search=' + encodeURIComponent(filters.search) : '' %>" class="btn btn-sm btn-secondary">&laquo; Prev</a>
+        <% } %>
+        <span class="page-info">Page <%= page %> of <%= totalPages %></span>
+        <% if (page < totalPages) { %>
+          <a href="/admin/subscribers?page=<%= page + 1 %><%= filters.status ? '&status=' + filters.status : '' %><%= filters.source ? '&source=' + filters.source : '' %><%= filters.search ? '&search=' + encodeURIComponent(filters.search) : '' %>" class="btn btn-sm btn-secondary">Next &raquo;</a>
+        <% } %>
+      </div>
+      <% } %>
+
+      <!-- Add Subscriber Modal -->
+      <div class="modal" id="addModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>Add Subscriber</h3>
+            <button class="modal-close" onclick="closeModal('addModal')">&times;</button>
+          </div>
+          <form method="POST" action="/admin/subscribers/add">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="modal-body">
+              <div class="form-group">
+                <label for="addEmail">Email *</label>
+                <input type="email" id="addEmail" name="email" class="form-control" required>
+              </div>
+              <div class="form-group">
+                <label for="addName">Name (optional)</label>
+                <input type="text" id="addName" name="name" class="form-control">
+              </div>
+              <p class="text-muted">Subscriber will be added as active (bypasses double opt-in).</p>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" onclick="closeModal('addModal')">Cancel</button>
+              <button type="submit" class="btn btn-primary">Add Subscriber</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Import CSV Modal -->
+      <div class="modal" id="importModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>Import Subscribers from CSV</h3>
+            <button class="modal-close" onclick="closeModal('importModal')">&times;</button>
+          </div>
+          <form method="POST" action="/admin/subscribers/import" enctype="multipart/form-data">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="modal-body">
+              <div class="form-group">
+                <label for="csvFile">CSV File</label>
+                <input type="file" id="csvFile" name="csvFile" accept=".csv" class="form-control" required>
+              </div>
+              <p class="text-muted">CSV should have columns: email, name. Header row is optional. All imported subscribers will be marked as active.</p>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" onclick="closeModal('importModal')">Cancel</button>
+              <button type="submit" class="btn btn-primary">Import</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <script>
+        function deleteSubscriber(id, email) {
+          if (!confirm('Delete subscriber ' + email + '? This cannot be undone.')) return;
+          fetch('/admin/subscribers/' + id, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ _csrf: '<%= csrfToken %>' })
+          })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.success) {
+              window.location.reload();
+            } else {
+              showToast(data.error || 'Delete failed.', 'error');
+            }
+          })
+          .catch(function() { showToast('Network error.', 'error'); });
+        }
+      </script>
+    </main>
+<%- include('partials/footer') %>

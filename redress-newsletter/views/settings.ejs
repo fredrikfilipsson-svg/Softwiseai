@@ -1,0 +1,91 @@
+<%- include('partials/header') %>
+<%- include('partials/sidebar') %>
+    <main class="main-content">
+      <div class="page-header">
+        <h1>Settings</h1>
+        <p class="page-desc">System configuration (read from environment variables)</p>
+      </div>
+
+      <div class="settings-grid">
+        <div class="card">
+          <div class="card-header"><h3>SMTP Configuration</h3></div>
+          <div class="card-body">
+            <div class="settings-row">
+              <span class="settings-label">SMTP Host</span>
+              <span class="settings-value"><%= settings.smtpHost || 'Not configured' %></span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">SMTP Port</span>
+              <span class="settings-value"><%= settings.smtpPort %></span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">SMTP Secure (TLS)</span>
+              <span class="settings-value"><%= settings.smtpSecure %></span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">SMTP User</span>
+              <span class="settings-value"><%= settings.smtpUser || 'Not configured' %></span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">From Name</span>
+              <span class="settings-value"><%= settings.smtpFromName || 'Not set' %></span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">From Email</span>
+              <span class="settings-value"><%= settings.smtpFromEmail || 'Not set' %></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3>Admin &amp; Sending</h3></div>
+          <div class="card-body">
+            <div class="settings-row">
+              <span class="settings-label">Admin Email</span>
+              <span class="settings-value"><%= settings.adminEmail || 'Not set' %></span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Base URL</span>
+              <span class="settings-value"><%= settings.baseUrl || 'Not set' %></span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Batch Size</span>
+              <span class="settings-value"><%= settings.batchSize %> emails per batch</span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Batch Delay</span>
+              <span class="settings-value"><%= settings.batchDelayMs %>ms between batches</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3>Company Information</h3></div>
+          <div class="card-body">
+            <div class="settings-row">
+              <span class="settings-label">Company</span>
+              <span class="settings-value">Redress Compliance LLC</span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Description</span>
+              <span class="settings-value">Independent Enterprise Software Licensing Advisory</span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Address</span>
+              <span class="settings-value">1314 E Las Olas Blvd, Fort Lauderdale, FL 33301</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3>Embed Widget</h3></div>
+          <div class="card-body">
+            <p class="text-muted" style="margin-bottom: 0.75rem;">Add this snippet to any HTML page to embed the newsletter sign-up form:</p>
+            <pre class="code-block">&lt;div id="redress-newsletter-signup"&gt;&lt;/div&gt;
+&lt;script src="<%= settings.baseUrl %>/widget/newsletter.js"&gt;&lt;/script&gt;</pre>
+            <p class="text-muted" style="margin-top: 0.75rem;">Optional: Add <code>data-style="card"</code> or <code>data-style="inline"</code> to the div for different layouts.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+<%- include('partials/footer') %>
