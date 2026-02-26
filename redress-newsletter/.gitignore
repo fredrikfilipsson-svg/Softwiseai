@@ -1,0 +1,7 @@
+node_modules/
+.env
+database/newsletter.db
+database/newsletter.db-wal
+database/newsletter.db-shm
+uploads/*
+!uploads/.gitkeep

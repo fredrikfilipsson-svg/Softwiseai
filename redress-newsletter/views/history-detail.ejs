@@ -1,0 +1,116 @@
+<%- include('partials/header') %>
+<%- include('partials/sidebar') %>
+    <main class="main-content">
+      <div class="page-header">
+        <div>
+          <h1><%= newsletter.subject %></h1>
+          <p class="page-desc">Sent on <%= newsletter.sent_at ? new Date(newsletter.sent_at).toLocaleString() : 'N/A' %></p>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-secondary" onclick="duplicateNewsletter(<%= newsletter.id %>)">Duplicate as Draft</button>
+          <button class="btn btn-primary" onclick="resendNewsletter(<%= newsletter.id %>)">Resend</button>
+        </div>
+      </div>
+
+      <div class="stats-grid stats-grid-sm">
+        <div class="stat-card">
+          <div class="stat-info">
+            <span class="stat-value"><%= newsletter.total_recipients %></span>
+            <span class="stat-label">Total Recipients</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-info">
+            <span class="stat-value text-success"><%= newsletter.successful_sends %></span>
+            <span class="stat-label">Successful</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-info">
+            <span class="stat-value text-danger"><%= newsletter.failed_sends %></span>
+            <span class="stat-label">Failed</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Newsletter Content</h3>
+        </div>
+        <div class="card-body">
+          <iframe id="contentPreview" class="preview-frame-lg" srcdoc="<%- newsletter.html_content.replace(/"/g, '&quot;') %>"></iframe>
+        </div>
+      </div>
+
+      <% if (sendLog && sendLog.length > 0) { %>
+      <div class="card" style="margin-top: 1.5rem;">
+        <div class="card-header">
+          <h3>Send Log</h3>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th>Error</th>
+                  <th>Sent At</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% sendLog.forEach(function(log) { %>
+                <tr>
+                  <td><%= log.email %></td>
+                  <td><%= log.name || '—' %></td>
+                  <td>
+                    <span class="badge badge-<%= log.status === 'sent' ? 'success' : 'danger' %>"><%= log.status %></span>
+                  </td>
+                  <td><%= log.error_message || '—' %></td>
+                  <td><%= log.sent_at ? new Date(log.sent_at).toLocaleString() : '—' %></td>
+                </tr>
+                <% }); %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <% } %>
+
+      <script>
+        function duplicateNewsletter(id) {
+          fetch('/admin/history/' + id + '/duplicate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ _csrf: '<%= csrfToken %>' })
+          })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.success) {
+              showToast('Newsletter duplicated as draft.', 'success');
+            } else {
+              showToast(data.error || 'Failed.', 'error');
+            }
+          });
+        }
+
+        function resendNewsletter(id) {
+          if (!confirm('Resend this newsletter to all active subscribers?')) return;
+          fetch('/admin/history/' + id + '/resend', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ _csrf: '<%= csrfToken %>' })
+          })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.success) {
+              showToast('Resend initiated.', 'success');
+            } else {
+              showToast(data.error || 'Resend failed.', 'error');
+            }
+          });
+        }
+      </script>
+    </main>
+<%- include('partials/footer') %>

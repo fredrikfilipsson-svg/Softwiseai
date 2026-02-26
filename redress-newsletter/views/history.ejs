@@ -1,0 +1,68 @@
+<%- include('partials/header') %>
+<%- include('partials/sidebar') %>
+    <main class="main-content">
+      <div class="page-header">
+        <h1>Sent History</h1>
+        <p class="page-desc">Previously sent newsletters</p>
+      </div>
+
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Subject</th>
+              <th>Date Sent</th>
+              <th>Recipients</th>
+              <th>Successful</th>
+              <th>Failed</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (newsletters.length === 0) { %>
+              <tr><td colspan="7" class="text-center text-muted">No newsletters sent yet.</td></tr>
+            <% } %>
+            <% newsletters.forEach(function(nl) { %>
+              <tr>
+                <td><a href="/admin/history/<%= nl.id %>"><%= nl.subject %></a></td>
+                <td><%= nl.sent_at ? new Date(nl.sent_at).toLocaleDateString() : '—' %></td>
+                <td><%= nl.total_recipients %></td>
+                <td class="text-success"><%= nl.successful_sends %></td>
+                <td class="text-danger"><%= nl.failed_sends %></td>
+                <td>
+                  <span class="badge badge-<%= nl.status === 'sent' ? 'success' : nl.status === 'sending' ? 'warning' : 'danger' %>">
+                    <%= nl.status %>
+                  </span>
+                </td>
+                <td>
+                  <a href="/admin/history/<%= nl.id %>" class="btn btn-sm btn-secondary">View</a>
+                  <button class="btn btn-sm btn-secondary" onclick="duplicateNewsletter(<%= nl.id %>)">Duplicate</button>
+                </td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+
+      <script>
+        function duplicateNewsletter(id) {
+          fetch('/admin/history/' + id + '/duplicate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ _csrf: '<%= csrfToken %>' })
+          })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.success) {
+              showToast('Newsletter duplicated as draft.', 'success');
+              setTimeout(function() { window.location.href = '/admin/compose'; }, 1000);
+            } else {
+              showToast(data.error || 'Duplication failed.', 'error');
+            }
+          })
+          .catch(function() { showToast('Network error.', 'error'); });
+        }
+      </script>
+    </main>
+<%- include('partials/footer') %>
