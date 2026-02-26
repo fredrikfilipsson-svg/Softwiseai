@@ -44,6 +44,179 @@
   animation: pulse-slow 2s ease-in-out infinite;
 }
 
+/* Finance page custom styles */
+.finance-bg {
+  background: #f3f5f9;
+}
+
+.sf-header {
+  background: linear-gradient(135deg, #032D60 0%, #0176D3 100%);
+}
+
+.sf-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  border: 1px solid rgba(0,0,0,0.05);
+  transition: box-shadow 0.2s ease;
+}
+
+.sf-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.sf-kpi {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  border: 1px solid rgba(0,0,0,0.05);
+  position: relative;
+  overflow: hidden;
+}
+
+.sf-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.sf-kpi-blue::before { background: linear-gradient(90deg, #0176D3, #1B96FF); }
+.sf-kpi-green::before { background: linear-gradient(90deg, #2E844A, #45C65A); }
+.sf-kpi-red::before { background: linear-gradient(90deg, #C23934, #EA4243); }
+.sf-kpi-amber::before { background: linear-gradient(90deg, #E87600, #FE9339); }
+.sf-kpi-purple::before { background: linear-gradient(90deg, #7526C4, #9D53F2); }
+
+.sf-tab {
+  position: relative;
+  color: rgba(255,255,255,0.7);
+  padding: 12px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: color 0.15s ease;
+}
+
+.sf-tab:hover {
+  color: rgba(255,255,255,0.95);
+}
+
+.sf-tab-active {
+  color: #fff;
+}
+
+.sf-tab-active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 12px;
+  right: 12px;
+  height: 3px;
+  background: white;
+  border-radius: 3px 3px 0 0;
+}
+
+.sf-table th {
+  background: #FAFBFC;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6B7280;
+  padding: 10px 16px;
+  border-bottom: 2px solid #E5E7EB;
+}
+
+.sf-table td {
+  padding: 12px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid #F3F4F6;
+}
+
+.sf-table tbody tr {
+  transition: background 0.1s ease;
+}
+
+.sf-table tbody tr:hover {
+  background: #F0F7FF;
+}
+
+.sf-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sf-progress-track {
+  background: #E5E7EB;
+  border-radius: 9999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.sf-progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sf-gradient-card {
+  border-radius: 12px;
+  padding: 20px 24px;
+  position: relative;
+  overflow: hidden;
+  color: white;
+}
+
+.sf-gradient-card::after {
+  content: '';
+  position: absolute;
+  top: -30%;
+  right: -10%;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+}
+
+.sf-chart-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  border: 1px solid rgba(0,0,0,0.05);
+  padding: 24px;
+}
+
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: #1F2937 !important;
+  border: none !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+  padding: 10px 14px !important;
+}
+
+.recharts-tooltip-wrapper .recharts-tooltip-label {
+  color: #D1D5DB !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  margin-bottom: 4px !important;
+}
+
+.recharts-tooltip-wrapper .recharts-tooltip-item {
+  color: #F9FAFB !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  padding: 2px 0 !important;
+}
+
 /* Print styles for PDF-like rendering */
 @media print {
   .no-print { display: none !important; }
